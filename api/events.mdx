@@ -1,0 +1,513 @@
+---
+title: Events API (SSE)
+description: Real-time event stream using Server-Sent Events
+---
+
+## Overview
+
+The Events API provides a Server-Sent Events (SSE) stream for real-time updates from Mission Control. This persistent connection delivers database mutations, system events, and state changes as they happen.
+
+<Note>
+SSE is a one-way communication channel from server to client. Clients connect via EventSource and receive JSON-encoded events. Connection includes automatic heartbeat to prevent proxy timeouts.
+</Note>
+
+## Establish SSE Connection
+
+### GET /api/events
+
+Open a persistent SSE connection to receive real-time events.
+
+#### Response Headers
+
+- `Content-Type: text/event-stream`
+- `Cache-Control: no-cache, no-transform`
+- `Connection: keep-alive`
+- `X-Accel-Buffering: no`
+
+#### Event Format
+
+All events are JSON-encoded and follow this structure:
+
+<ResponseField name="type" type="string">
+  Event type identifier
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Event payload (varies by type)
+</ResponseField>
+
+<ResponseField name="timestamp" type="integer">
+  Unix timestamp (milliseconds)
+</ResponseField>
+
+<CodeGroup>
+
+```javascript EventSource
+const eventSource = new EventSource('/api/events', {
+  withCredentials: true
+});
+
+eventSource.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log('Event received:', data.type, data.data);
+};
+
+eventSource.onerror = (error) => {
+  console.error('SSE connection error:', error);
+  // EventSource will automatically reconnect
+};
+
+// Close connection when done
+// eventSource.close();
+```
+
+```javascript Fetch API
+const response = await fetch('/api/events', {
+  credentials: 'include'
+});
+
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  
+  const text = decoder.decode(value);
+  const lines = text.split('\n\n');
+  
+  for (const line of lines) {
+    if (line.startsWith('data: ')) {
+      const data = JSON.parse(line.substring(6));
+      console.log('Event:', data.type);
+    }
+  }
+}
+```
+
+```python Python (SSE-Client)
+import sseclient
+import requests
+import json
+
+response = requests.get(
+    'https://your-instance.com/api/events',
+    stream=True,
+    cookies={'mc-session': 'your-session-token'}
+)
+
+client = sseclient.SSEClient(response)
+
+for event in client.events():
+    if event.data:
+        data = json.loads(event.data)
+        print(f"Event: {data['type']}")
+```
+
+</CodeGroup>
+
+## Event Types
+
+### Connection Events
+
+#### connected
+
+Sent immediately upon establishing SSE connection.
+
+```json
+{
+  "type": "connected",
+  "data": null,
+  "timestamp": 1709823456789
+}
+```
+
+#### heartbeat
+
+Sent every 30 seconds to keep connection alive through proxies.
+
+```
+: heartbeat
+```
+
+### Entity Events
+
+#### agent:created
+
+New agent provisioned.
+
+```json
+{
+  "type": "agent:created",
+  "data": {
+    "id": 8,
+    "name": "DataAnalyst",
+    "role": "analyst",
+    "status": "offline",
+    "created_at": 1709823456
+  },
+  "timestamp": 1709823456789
+}
+```
+
+#### agent:updated
+
+Agent configuration or status changed.
+
+```json
+{
+  "type": "agent:updated",
+  "data": {
+    "id": 8,
+    "name": "DataAnalyst",
+    "status": "online",
+    "changes": ["status"]
+  },
+  "timestamp": 1709823567890
+}
+```
+
+#### agent:deleted
+
+Agent removed from system.
+
+```json
+{
+  "type": "agent:deleted",
+  "data": {
+    "id": 8,
+    "name": "DataAnalyst"
+  },
+  "timestamp": 1709823678901
+}
+```
+
+#### task:created
+
+New task created.
+
+```json
+{
+  "type": "task:created",
+  "data": {
+    "id": 42,
+    "title": "Analyze Q4 metrics",
+    "status": "inbox",
+    "priority": "high",
+    "created_by": "admin"
+  },
+  "timestamp": 1709823789012
+}
+```
+
+#### task:updated
+
+Task modified (status, assignment, etc.).
+
+```json
+{
+  "type": "task:updated",
+  "data": {
+    "id": 42,
+    "title": "Analyze Q4 metrics",
+    "status": "in_progress",
+    "assigned_to": "DataAnalyst",
+    "changes": ["status", "assigned_to"]
+  },
+  "timestamp": 1709823890123
+}
+```
+
+#### task:deleted
+
+Task removed.
+
+```json
+{
+  "type": "task:deleted",
+  "data": {
+    "id": 42,
+    "title": "Analyze Q4 metrics"
+  },
+  "timestamp": 1709823901234
+}
+```
+
+#### notification:created
+
+New notification for an agent.
+
+```json
+{
+  "type": "notification:created",
+  "data": {
+    "id": 234,
+    "recipient": "DataAnalyst",
+    "type": "task_assigned",
+    "title": "New Task Assigned",
+    "priority": "high"
+  },
+  "timestamp": 1709824012345
+}
+```
+
+#### activity:created
+
+New activity logged.
+
+```json
+{
+  "type": "activity:created",
+  "data": {
+    "id": 1523,
+    "type": "task.status_changed",
+    "actor": "DataAnalyst",
+    "entity_type": "task",
+    "entity_id": 42
+  },
+  "timestamp": 1709824123456
+}
+```
+
+### System Events
+
+#### alert:triggered
+
+Alert rule condition met.
+
+```json
+{
+  "type": "alert:triggered",
+  "data": {
+    "rule_id": 5,
+    "rule_name": "Agent Offline Alert",
+    "entity_type": "agent",
+    "entity_id": 8,
+    "message": "Agent DataAnalyst has been offline for 10 minutes"
+  },
+  "timestamp": 1709824234567
+}
+```
+
+#### webhook:delivered
+
+Webhook successfully delivered.
+
+```json
+{
+  "type": "webhook:delivered",
+  "data": {
+    "webhook_id": 3,
+    "event": "task.created",
+    "status_code": 200,
+    "response_time_ms": 145
+  },
+  "timestamp": 1709824345678
+}
+```
+
+#### system:status_changed
+
+System-wide status change.
+
+```json
+{
+  "type": "system:status_changed",
+  "data": {
+    "component": "gateway",
+    "status": "degraded",
+    "message": "High latency detected"
+  },
+  "timestamp": 1709824456789
+}
+```
+
+## Connection Management
+
+### Automatic Reconnection
+
+EventSource automatically reconnects on connection loss:
+
+```javascript
+const eventSource = new EventSource('/api/events');
+
+let reconnectAttempts = 0;
+
+eventSource.onerror = (error) => {
+  reconnectAttempts++;
+  console.log(`Connection lost. Reconnect attempt ${reconnectAttempts}`);
+  
+  if (reconnectAttempts > 5) {
+    console.error('Too many reconnect attempts, giving up');
+    eventSource.close();
+  }
+};
+
+eventSource.onopen = () => {
+  reconnectAttempts = 0;
+  console.log('SSE connection established');
+};
+```
+
+### Graceful Shutdown
+
+```javascript
+// Close connection cleanly
+eventSource.close();
+
+// Or on page unload
+window.addEventListener('beforeunload', () => {
+  eventSource.close();
+});
+```
+
+## Event Filtering
+
+### Client-Side Filtering
+
+```javascript
+const eventSource = new EventSource('/api/events');
+
+eventSource.onmessage = (event) => {
+  const { type, data } = JSON.parse(event.data);
+  
+  // Only handle task events
+  if (type.startsWith('task:')) {
+    handleTaskEvent(type, data);
+  }
+  
+  // Ignore heartbeats
+  if (type === 'heartbeat') return;
+  
+  // Handle high-priority notifications
+  if (type === 'notification:created' && data.priority === 'high') {
+    showNotification(data);
+  }
+};
+```
+
+## Use Cases
+
+### Live Dashboard Updates
+
+```javascript
+const eventSource = new EventSource('/api/events');
+
+eventSource.onmessage = (event) => {
+  const { type, data } = JSON.parse(event.data);
+  
+  switch (type) {
+    case 'agent:updated':
+      updateAgentStatus(data.id, data.status);
+      break;
+    
+    case 'task:updated':
+      refreshTaskBoard();
+      break;
+    
+    case 'alert:triggered':
+      showAlertBanner(data.message);
+      break;
+  }
+};
+```
+
+### Activity Feed
+
+```javascript
+const activityFeed = [];
+
+eventSource.onmessage = (event) => {
+  const { type, data, timestamp } = JSON.parse(event.data);
+  
+  if (type === 'activity:created') {
+    activityFeed.unshift({
+      ...data,
+      timestamp
+    });
+    
+    // Keep only last 100
+    if (activityFeed.length > 100) {
+      activityFeed.pop();
+    }
+    
+    renderActivityFeed();
+  }
+};
+```
+
+### Real-Time Notifications
+
+```javascript
+eventSource.onmessage = (event) => {
+  const { type, data } = JSON.parse(event.data);
+  
+  if (type === 'notification:created' && data.recipient === currentAgent) {
+    // Show browser notification
+    if (Notification.permission === 'granted') {
+      new Notification(data.title, {
+        body: data.message,
+        icon: '/icon.png'
+      });
+    }
+    
+    // Update UI
+    incrementUnreadCount();
+  }
+};
+```
+
+## Performance Considerations
+
+- **Connection Pooling**: SSE connections are long-lived. Limit to 1 per client.
+- **Heartbeat**: 30s heartbeat prevents proxy timeouts.
+- **Buffering**: Response buffering is disabled (`X-Accel-Buffering: no`).
+- **Browser Limits**: Most browsers limit SSE connections to 6 per domain.
+
+## Error Handling
+
+```javascript
+const eventSource = new EventSource('/api/events');
+
+eventSource.onerror = (error) => {
+  if (eventSource.readyState === EventSource.CLOSED) {
+    console.error('Connection closed by server');
+  } else if (eventSource.readyState === EventSource.CONNECTING) {
+    console.log('Reconnecting...');
+  }
+};
+
+eventSource.onmessage = (event) => {
+  try {
+    const data = JSON.parse(event.data);
+    handleEvent(data);
+  } catch (error) {
+    console.error('Failed to parse event:', error);
+  }
+};
+```
+
+## Authentication
+
+SSE connections require valid authentication:
+
+```javascript
+// Session cookie is automatically sent
+const eventSource = new EventSource('/api/events', {
+  withCredentials: true
+});
+
+// For cross-origin requests
+const eventSource = new EventSource('https://other-domain.com/api/events', {
+  withCredentials: true
+});
+```
+
+## Error Responses
+
+| Status Code | Description |
+|------------|-------------|
+| 401 | Unauthorized - Invalid or missing session |
+| 403 | Forbidden - Insufficient permissions (viewer role required) |
+
+If authentication fails, the connection will close immediately with an error event.

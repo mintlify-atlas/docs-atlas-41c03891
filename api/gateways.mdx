@@ -1,0 +1,522 @@
+---
+title: Gateways
+description: Manage OpenClaw gateway connections for agent orchestration
+---
+
+# Gateways
+
+Gateways are OpenClaw instances that run AI agents and execute tasks. Mission Control connects to one or more gateways to orchestrate agent lifecycles, monitor sessions, and sync agent configurations.
+
+---
+
+## List Gateways
+
+Retrieve all registered gateways with connection status and health metrics.
+
+<CodeGroup>
+```bash cURL
+curl http://localhost:3000/api/gateways \
+  -H "x-api-key: YOUR_API_KEY"
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:3000/api/gateways', {
+  headers: { 'x-api-key': 'YOUR_API_KEY' }
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+### Response
+
+<ResponseField name="gateways" type="array">
+  Array of gateway configurations
+
+  <ResponseField name="id" type="integer">
+    Gateway ID
+  </ResponseField>
+
+  <ResponseField name="name" type="string">
+    Gateway name (unique)
+  </ResponseField>
+
+  <ResponseField name="host" type="string">
+    Hostname or IP address (e.g., `127.0.0.1`, `gateway.example.com`)
+  </ResponseField>
+
+  <ResponseField name="port" type="integer">
+    Gateway port (default: 18789)
+  </ResponseField>
+
+  <ResponseField name="token" type="string">
+    Redacted authentication token (shows `--------` or empty)
+  </ResponseField>
+
+  <ResponseField name="token_set" type="boolean">
+    Whether authentication token is configured
+  </ResponseField>
+
+  <ResponseField name="is_primary" type="boolean">
+    Whether this is the primary gateway
+  </ResponseField>
+
+  <ResponseField name="status" type="string">
+    Connection status: `online`, `offline`, `degraded`, `unknown`
+  </ResponseField>
+
+  <ResponseField name="last_seen" type="integer">
+    Unix timestamp of last successful health check (null if never checked)
+  </ResponseField>
+
+  <ResponseField name="latency" type="integer">
+    Health check latency in milliseconds (null if unavailable)
+  </ResponseField>
+
+  <ResponseField name="sessions_count" type="integer">
+    Number of active sessions on this gateway
+  </ResponseField>
+
+  <ResponseField name="agents_count" type="integer">
+    Number of agents registered to this gateway
+  </ResponseField>
+
+  <ResponseField name="created_at" type="integer">
+    Unix timestamp
+  </ResponseField>
+
+  <ResponseField name="updated_at" type="integer">
+    Unix timestamp
+  </ResponseField>
+</ResponseField>
+
+<Note>
+If no gateways exist, Mission Control automatically seeds a default gateway using environment variables (`OPENCLAW_GATEWAY_HOST`, `OPENCLAW_GATEWAY_PORT`, `OPENCLAW_GATEWAY_TOKEN`).
+</Note>
+
+---
+
+## Add Gateway
+
+Register a new gateway connection.
+
+<CodeGroup>
+```bash cURL
+curl -X POST http://localhost:3000/api/gateways \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{
+    "name": "production",
+    "host": "gateway.prod.example.com",
+    "port": 18789,
+    "token": "your-gateway-auth-token",
+    "is_primary": false
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:3000/api/gateways', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'x-api-key': 'YOUR_API_KEY'
+  },
+  body: JSON.stringify({
+    name: 'production',
+    host: 'gateway.prod.example.com',
+    port: 18789,
+    token: 'your-gateway-auth-token'
+  })
+});
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Unique gateway name for identification
+</ParamField>
+
+<ParamField body="host" type="string" required>
+  Gateway hostname or IP address
+</ParamField>
+
+<ParamField body="port" type="integer" required>
+  Gateway port (typically 18789)
+</ParamField>
+
+<ParamField body="token" type="string">
+  Authentication token for gateway API (if required)
+</ParamField>
+
+<ParamField body="is_primary" type="boolean" default={false}>
+  Mark as primary gateway (automatically unsets other primaries)
+</ParamField>
+
+### Response
+
+<ResponseField name="gateway" type="object">
+  Created gateway object (see List response for schema)
+</ResponseField>
+
+---
+
+## Update Gateway
+
+Update gateway configuration or health metrics.
+
+<CodeGroup>
+```bash cURL
+curl -X PUT http://localhost:3000/api/gateways \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{
+    "id": 1,
+    "name": "primary-gateway",
+    "is_primary": true
+  }'
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="id" type="integer" required>
+  Gateway ID to update
+</ParamField>
+
+<ParamField body="name" type="string">
+  New gateway name
+</ParamField>
+
+<ParamField body="host" type="string">
+  New hostname
+</ParamField>
+
+<ParamField body="port" type="integer">
+  New port
+</ParamField>
+
+<ParamField body="token" type="string">
+  New authentication token
+</ParamField>
+
+<ParamField body="is_primary" type="boolean">
+  Update primary status (unsets other primaries if true)
+</ParamField>
+
+<ParamField body="status" type="string">
+  Update connection status (typically set by health checks)
+</ParamField>
+
+<ParamField body="last_seen" type="integer">
+  Update last seen timestamp (set by health checks)
+</ParamField>
+
+<ParamField body="latency" type="integer">
+  Update latency metric (set by health checks)
+</ParamField>
+
+<ParamField body="sessions_count" type="integer">
+  Update session count (set by sync operations)
+</ParamField>
+
+<ParamField body="agents_count" type="integer">
+  Update agent count (set by sync operations)
+</ParamField>
+
+---
+
+## Delete Gateway
+
+Remove a gateway registration.
+
+<CodeGroup>
+```bash cURL
+curl -X DELETE http://localhost:3000/api/gateways \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{"id": 2}'
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="id" type="integer" required>
+  Gateway ID to delete
+</ParamField>
+
+<Warning>
+You cannot delete the **primary gateway**. Assign another gateway as primary first.
+</Warning>
+
+---
+
+## Health Check Gateway
+
+Probe gateway connectivity and update health metrics.
+
+<CodeGroup>
+```bash cURL
+curl -X POST http://localhost:3000/api/gateways/health \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{"gateway_id": 1}'
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="gateway_id" type="integer">
+  Gateway ID to check (omit to check all gateways)
+</ParamField>
+
+### Response
+
+<ResponseField name="healthy" type="boolean">
+  Whether gateway is reachable
+</ResponseField>
+
+<ResponseField name="latency_ms" type="number">
+  Round-trip latency in milliseconds
+</ResponseField>
+
+<ResponseField name="details" type="object">
+  Additional health check details (gateway version, uptime, etc.)
+</ResponseField>
+
+---
+
+## Gateway Configuration
+
+### Environment Variables
+
+Mission Control reads default gateway settings from environment variables:
+
+```bash
+# Default gateway settings (auto-seeded if no gateways exist)
+MC_DEFAULT_GATEWAY_NAME="primary"
+OPENCLAW_GATEWAY_HOST="127.0.0.1"
+OPENCLAW_GATEWAY_PORT="18789"
+OPENCLAW_GATEWAY_TOKEN="your-token-here"
+
+# Legacy aliases (also supported)
+GATEWAY_PORT="18789"
+GATEWAY_TOKEN="your-token"
+NEXT_PUBLIC_GATEWAY_PORT="18789"
+```
+
+### Primary Gateway
+
+The **primary gateway** is used for:
+- Default agent spawning
+- Configuration sync operations
+- Health monitoring dashboard
+
+Only one gateway can be primary at a time. Setting a new gateway as primary automatically unsets the previous one.
+
+---
+
+## Integration with OpenClaw
+
+Mission Control communicates with OpenClaw gateways over HTTP:
+
+| Operation | Gateway Endpoint | Description |
+|-----------|------------------|-------------|
+| Spawn agent | `POST /spawn` | Start a new agent session |
+| Control session | `POST /control` | Pause/resume/kill session |
+| List sessions | `GET /sessions` | Query active sessions |
+| Health check | `GET /health` | Probe gateway status |
+| Sync config | `GET /config` | Read agent configurations |
+
+### Authentication
+
+If `token` is set, Mission Control includes it in requests:
+
+```bash
+Authorization: Bearer <token>
+```
+
+---
+
+## Agent Synchronization
+
+Mission Control can sync agent definitions from gateway configuration files:
+
+<CodeGroup>
+```bash Sync Agents
+curl -X POST http://localhost:3000/api/agents/sync \
+  -H "x-api-key: YOUR_API_KEY"
+```
+</CodeGroup>
+
+This reads the primary gateway's agent config and:
+1. Creates new agents not in Mission Control
+2. Updates existing agents with new configuration
+3. Returns sync statistics
+
+### Response
+
+```json
+{
+  "synced": 5,
+  "created": 2,
+  "updated": 3
+}
+```
+
+---
+
+## Session Management
+
+Monitor active agent sessions across all gateways:
+
+<CodeGroup>
+```bash List Sessions
+curl "http://localhost:3000/api/sessions?agent=researcher" \
+  -H "x-api-key: YOUR_API_KEY"
+```
+</CodeGroup>
+
+### Query Parameters
+
+<ParamField query="agent" type="string">
+  Filter sessions by agent name
+</ParamField>
+
+<ParamField query="limit" type="integer" default={50}>
+  Maximum sessions to return
+</ParamField>
+
+### Response
+
+<ResponseField name="sessions" type="array">
+  <ResponseField name="key" type="string">
+    Session key (unique identifier)
+  </ResponseField>
+
+  <ResponseField name="agent" type="string">
+    Agent name
+  </ResponseField>
+
+  <ResponseField name="model" type="string">
+    LLM model in use (e.g., `claude-sonnet-4`)
+  </ResponseField>
+
+  <ResponseField name="status" type="string">
+    Session status: `active`, `paused`, `completed`
+  </ResponseField>
+
+  <ResponseField name="totalTokens" type="integer">
+    Total tokens used in this session
+  </ResponseField>
+
+  <ResponseField name="updatedAt" type="integer">
+    Unix timestamp of last activity
+  </ResponseField>
+</ResponseField>
+
+---
+
+## Control Session
+
+Pause, resume, or kill a gateway session.
+
+<CodeGroup>
+```bash Pause Session
+curl -X POST http://localhost:3000/api/sessions/researcher:main/control \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{"action": "pause"}'
+```
+
+```bash Kill Session
+curl -X POST http://localhost:3000/api/sessions/researcher:main/control \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{"action": "kill"}'
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="action" type="string" required>
+  Session control action:
+  - `pause` - Suspend session execution
+  - `resume` - Resume paused session
+  - `kill` - Terminate session immediately
+</ParamField>
+
+---
+
+## Multi-Gateway Support
+
+Mission Control supports multiple gateway connections for:
+
+- **Load distribution**: Spread agent execution across gateways
+- **Geo-distribution**: Run agents closer to data sources
+- **Environment separation**: Dev/staging/prod gateways
+- **High availability**: Failover to backup gateways
+
+### Gateway Selection
+
+When spawning an agent, Mission Control selects a gateway based on:
+
+1. **Agent config** - If agent has `gateway_config.preferred_gateway`
+2. **Primary gateway** - Default if no preference set
+3. **Load balancing** - Future: route to least-loaded gateway
+
+---
+
+## Monitoring & Observability
+
+### Health Check Automation
+
+Mission Control automatically health-checks all gateways:
+
+- **Frequency**: Every 5 minutes
+- **Updates**: `status`, `last_seen`, `latency` fields
+- **Circuit breaker**: Marks offline after 3 consecutive failures
+
+### Gateway Dashboard
+
+View gateway status in the Mission Control UI:
+
+```
+Settings → Gateways
+```
+
+Displays:
+- Connection status (online/offline/degraded)
+- Latency graph (last 24h)
+- Active session count
+- Registered agent count
+
+---
+
+## Security Considerations
+
+- **Token protection**: Tokens are redacted in API responses
+- **Admin-only**: Only `admin` role can add/update/delete gateways
+- **Network isolation**: Use private networks or VPNs for gateway communication
+- **TLS**: Recommended for production (configure reverse proxy)
+
+---
+
+## Best Practices
+
+1. **Use descriptive names** - `prod-us-east`, `dev-local`, etc.
+2. **Monitor latency** - High latency (>500ms) indicates network issues
+3. **Set primary wisely** - Choose geographically closest or most reliable
+4. **Regular health checks** - Enable automatic health monitoring
+5. **Backup gateways** - Configure at least 2 gateways for production
+
+---
+
+## Rate Limits
+
+- **Gateway operations**: 100 requests/minute per API key
+- **Health checks**: Manual checks limited to 1 request/10 seconds
+- **Session control**: 10 requests/minute per session
+
+<Note>
+Automatic health checks and sync operations run independently and are not rate-limited.
+</Note>

@@ -1,0 +1,488 @@
+---
+title: Notifications API
+description: Manage and deliver agent notifications
+---
+
+## Overview
+
+The Notifications API manages a per-agent notification system that tracks important events requiring attention. Notifications support delivery tracking, read receipts, and automatic cleanup of old messages.
+
+<Note>
+Notifications are targeted to specific recipients (agents or users) and include enhanced source entity details for context.
+</Note>
+
+## Get Notifications
+
+### GET /api/notifications
+
+Retrieve notifications for a specific recipient with filtering and pagination.
+
+#### Query Parameters
+
+<ParamField query="recipient" type="string" required>
+  Recipient identifier (agent name or username)
+</ParamField>
+
+<ParamField query="unread_only" type="boolean" default="false">
+  Return only unread notifications
+</ParamField>
+
+<ParamField query="type" type="string">
+  Filter by notification type (e.g., `task_assigned`, `mention`, `alert`)
+</ParamField>
+
+<ParamField query="limit" type="integer" default="50">
+  Number of notifications to return (max 500)
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Pagination offset
+</ParamField>
+
+#### Response
+
+<ResponseField name="notifications" type="array">
+  Array of notifications with enhanced source details
+  
+  <ResponseField name="id" type="integer">
+    Notification ID
+  </ResponseField>
+  
+  <ResponseField name="recipient" type="string">
+    Recipient identifier
+  </ResponseField>
+  
+  <ResponseField name="type" type="string">
+    Notification type
+  </ResponseField>
+  
+  <ResponseField name="title" type="string">
+    Notification title
+  </ResponseField>
+  
+  <ResponseField name="message" type="string">
+    Notification message
+  </ResponseField>
+  
+  <ResponseField name="source_type" type="string">
+    Source entity type: `task`, `agent`, `comment`, etc.
+  </ResponseField>
+  
+  <ResponseField name="source_id" type="integer">
+    Source entity ID
+  </ResponseField>
+  
+  <ResponseField name="source" type="object">
+    Enhanced source entity details
+    
+    <ResponseField name="type" type="string">
+      Entity type
+    </ResponseField>
+    
+    <ResponseField name="id" type="integer">
+      Entity ID
+    </ResponseField>
+    
+    <ResponseField name="title" type="string">
+      Task title (for task sources)
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      Agent name (for agent sources)
+    </ResponseField>
+    
+    <ResponseField name="status" type="string">
+      Current status
+    </ResponseField>
+  </ResponseField>
+  
+  <ResponseField name="priority" type="string">
+    Priority level: `low`, `medium`, `high`, `critical`
+  </ResponseField>
+  
+  <ResponseField name="created_at" type="integer">
+    Unix timestamp when notification was created
+  </ResponseField>
+  
+  <ResponseField name="delivered_at" type="integer" nullable>
+    Unix timestamp when delivered to agent (null if not delivered)
+  </ResponseField>
+  
+  <ResponseField name="read_at" type="integer" nullable>
+    Unix timestamp when marked as read (null if unread)
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="total" type="integer">
+  Total number of matching notifications
+</ResponseField>
+
+<ResponseField name="page" type="integer">
+  Current page number
+</ResponseField>
+
+<ResponseField name="limit" type="integer">
+  Page size
+</ResponseField>
+
+<ResponseField name="unreadCount" type="integer">
+  Total unread notifications for this recipient
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X GET "https://your-instance.com/api/notifications?recipient=DataAnalyst&unread_only=true" \
+  -H "Cookie: mc-session=your-session-token"
+```
+
+```javascript fetch
+const response = await fetch('/api/notifications?recipient=CodeReviewer&limit=20');
+const { notifications, unreadCount } = await response.json();
+console.log(`${unreadCount} unread notifications`);
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'https://your-instance.com/api/notifications',
+    params={
+        'recipient': 'DataAnalyst',
+        'type': 'task_assigned',
+        'unread_only': True
+    },
+    cookies={'mc-session': 'your-session-token'}
+)
+data = response.json()
+```
+
+</CodeGroup>
+
+### Response Example
+
+```json
+{
+  "notifications": [
+    {
+      "id": 234,
+      "recipient": "DataAnalyst",
+      "type": "task_assigned",
+      "title": "New Task Assigned",
+      "message": "You've been assigned: Analyze Q4 metrics",
+      "source_type": "task",
+      "source_id": 42,
+      "source": {
+        "type": "task",
+        "id": 42,
+        "title": "Analyze Q4 metrics",
+        "status": "assigned"
+      },
+      "priority": "high",
+      "created_at": 1709823456,
+      "delivered_at": 1709823460,
+      "read_at": null
+    },
+    {
+      "id": 233,
+      "recipient": "DataAnalyst",
+      "type": "mention",
+      "title": "Mentioned in Comment",
+      "message": "CodeReviewer mentioned you in a comment",
+      "source_type": "comment",
+      "source_id": 89,
+      "source": {
+        "type": "comment",
+        "id": 89,
+        "task_id": 38,
+        "task_title": "Review authentication PR",
+        "content_preview": "@DataAnalyst can you verify the metrics calculations?"
+      },
+      "priority": "medium",
+      "created_at": 1709823123,
+      "delivered_at": 1709823125,
+      "read_at": 1709823200
+    }
+  ],
+  "total": 2,
+  "page": 1,
+  "limit": 50,
+  "unreadCount": 1
+}
+```
+
+## Mark Notifications as Read
+
+### PUT /api/notifications
+
+Mark one or more notifications as read.
+
+#### Request Body
+
+<ParamField body="ids" type="array" required="conditional">
+  Array of notification IDs to mark as read
+</ParamField>
+
+<ParamField body="recipient" type="string" required="conditional">
+  Recipient identifier (required when using `markAllRead`)
+</ParamField>
+
+<ParamField body="markAllRead" type="boolean" default="false">
+  Mark all unread notifications for recipient as read
+</ParamField>
+
+<Note>
+Provide either `ids` array OR `recipient` with `markAllRead=true`.
+</Note>
+
+<CodeGroup>
+
+```bash curl - Mark Specific
+curl -X PUT "https://your-instance.com/api/notifications" \
+  -H "Cookie: mc-session=your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ids": [234, 235, 236]
+  }'
+```
+
+```bash curl - Mark All Read
+curl -X PUT "https://your-instance.com/api/notifications" \
+  -H "Cookie: mc-session=your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "recipient": "DataAnalyst",
+    "markAllRead": true
+  }'
+```
+
+```javascript fetch
+// Mark specific notifications as read
+const response = await fetch('/api/notifications', {
+  method: 'PUT',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ ids: [234, 235] })
+});
+
+// Mark all as read
+const response = await fetch('/api/notifications', {
+  method: 'PUT',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    recipient: 'DataAnalyst',
+    markAllRead: true
+  })
+});
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "success": true,
+  "markedAsRead": 3
+}
+```
+
+## Mark as Delivered (Agent Heartbeat)
+
+### POST /api/notifications
+
+Mark pending notifications as delivered to an agent. This is typically called by agents during their heartbeat check.
+
+#### Request Body
+
+<ParamField body="action" type="string" required>
+  Set to `mark-delivered`
+</ParamField>
+
+<ParamField body="agent" type="string" required>
+  Agent name
+</ParamField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST "https://your-instance.com/api/notifications" \
+  -H "Cookie: mc-session=your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "mark-delivered",
+    "agent": "DataAnalyst"
+  }'
+```
+
+```javascript fetch
+const response = await fetch('/api/notifications', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    action: 'mark-delivered',
+    agent: 'DataAnalyst'
+  })
+});
+
+const { notifications } = await response.json();
+// Process delivered notifications
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "success": true,
+  "delivered": 2,
+  "notifications": [
+    {
+      "id": 234,
+      "recipient": "DataAnalyst",
+      "type": "task_assigned",
+      "title": "New Task Assigned",
+      "message": "You've been assigned: Analyze Q4 metrics",
+      "created_at": 1709823456,
+      "delivered_at": 1709823500
+    }
+  ]
+}
+```
+
+## Delete Notifications
+
+### DELETE /api/notifications
+
+Delete notifications (requires admin role).
+
+#### Request Body
+
+<ParamField body="ids" type="array" required="conditional">
+  Array of notification IDs to delete
+</ParamField>
+
+<ParamField body="recipient" type="string" required="conditional">
+  Recipient identifier (required when using `olderThan`)
+</ParamField>
+
+<ParamField body="olderThan" type="integer" required="conditional">
+  Unix timestamp. Delete notifications older than this time.
+</ParamField>
+
+<CodeGroup>
+
+```bash curl - Delete Specific
+curl -X DELETE "https://your-instance.com/api/notifications" \
+  -H "Cookie: mc-session=your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ids": [234, 235]
+  }'
+```
+
+```bash curl - Delete Old
+curl -X DELETE "https://your-instance.com/api/notifications" \
+  -H "Cookie: mc-session=your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "recipient": "DataAnalyst",
+    "olderThan": 1709737056
+  }'
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "success": true,
+  "deleted": 12
+}
+```
+
+## Common Notification Types
+
+- `task_assigned` - Task assigned to agent
+- `task_completed` - Task marked as complete
+- `mention` - Agent mentioned in comment
+- `alert_triggered` - Alert rule triggered
+- `agent_offline` - Another agent went offline
+- `webhook_failed` - Webhook delivery failed
+- `resource_limit` - Resource threshold exceeded
+- `system_message` - System-wide announcement
+
+## Notification Lifecycle
+
+1. **Created** - Notification is created with `created_at` timestamp
+2. **Delivered** - Agent fetches via heartbeat, `delivered_at` is set
+3. **Read** - Agent marks as read, `read_at` is set
+4. **Deleted** - Admin cleans up old notifications
+
+## Best Practices
+
+### Agent Heartbeat Pattern
+
+```javascript
+// In agent heartbeat loop
+async function checkNotifications() {
+  // Mark as delivered and get new notifications
+  const response = await fetch('/api/notifications', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'mark-delivered',
+      agent: agentName
+    })
+  });
+  
+  const { notifications } = await response.json();
+  
+  // Process notifications
+  for (const notif of notifications) {
+    await handleNotification(notif);
+  }
+  
+  // Mark as read after processing
+  if (notifications.length > 0) {
+    await fetch('/api/notifications', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ids: notifications.map(n => n.id)
+      })
+    });
+  }
+}
+```
+
+### Cleanup Old Notifications
+
+```javascript
+// Delete notifications older than 30 days
+const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
+
+await fetch('/api/notifications', {
+  method: 'DELETE',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    recipient: 'DataAnalyst',
+    olderThan: thirtyDaysAgo
+  })
+});
+```
+
+## Error Responses
+
+<ResponseField name="error" type="string">
+  Error message
+</ResponseField>
+
+| Status Code | Description |
+|------------|-------------|
+| 400 | Bad request - Missing required parameters |
+| 401 | Unauthorized - Invalid or missing session |
+| 403 | Forbidden - Insufficient permissions |
+| 429 | Rate limited |
+| 500 | Internal server error |

@@ -1,0 +1,486 @@
+---
+title: 'Multi-Gateway Connections'
+description: 'Manage multiple OpenClaw gateway connections with health monitoring and automatic failover'
+icon: 'network-wired'
+---
+
+## Overview
+
+**Multi-Gateway** support lets you connect Mission Control to multiple OpenClaw gateway instances simultaneously. Monitor connection health, switch between gateways, and manage direct CLI connections—all from a unified interface.
+
+<Info>
+Connect to gateways on different hosts, ports, or networks to support distributed agent fleets, dev/staging/prod environments, or high-availability configurations.
+</Info>
+
+## Architecture
+
+Mission Control supports two connection types:
+
+<Tabs>
+  <Tab title="Gateway Connections">
+    WebSocket connections to OpenClaw gateway servers. Each gateway can manage multiple agents.
+
+    ```typescript
+    interface Gateway {
+      id: number
+      name: string              // Human-readable identifier
+      host: string              // IP or hostname
+      port: number              // WebSocket port (default: 18789)
+      token_set: boolean        // Whether auth token configured
+      is_primary: number        // 1 if primary, 0 otherwise
+      status: string            // 'online' | 'offline' | 'timeout'
+      last_seen: number | null  // Last successful probe timestamp
+      latency: number | null    // Round-trip time in ms
+      sessions_count: number    // Active agent sessions
+      agents_count: number      // Registered agents
+      created_at: number
+      updated_at: number
+    }
+    ```
+  </Tab>
+
+  <Tab title="Direct Connections">
+    CLI tools (Claude Code, Codex, custom scripts) connecting directly via REST API without a gateway.
+
+    ```typescript
+    interface DirectConnection {
+      id: number
+      agent_id: number
+      tool_name: string         // e.g., "claude-code", "codex"
+      tool_version: string | null
+      connection_id: string     // Unique connection identifier
+      status: string            // 'connected' | 'disconnected'
+      last_heartbeat: number | null
+      metadata: string | null   // JSON metadata from tool
+      created_at: number
+      agent_name: string        // Denormalized from agents table
+      agent_status: string
+      agent_role: string
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Gateway Configuration
+
+### Database Schema
+
+Gateways are stored in the `gateways` table:
+
+```sql
+CREATE TABLE gateways (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  host TEXT NOT NULL,
+  port INTEGER NOT NULL,
+  token TEXT,                    -- Encrypted gateway auth token
+  is_primary INTEGER DEFAULT 0,  -- Only one can be primary
+  status TEXT DEFAULT 'unknown', -- online, offline, timeout
+  last_seen INTEGER,
+  latency INTEGER,               -- ms
+  sessions_count INTEGER DEFAULT 0,
+  agents_count INTEGER DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)
+```
+
+### Adding a Gateway
+
+Use the UI form or API:
+
+<CodeGroup>
+```bash POST /api/gateways
+curl -X POST "http://localhost:3000/api/gateways" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Production Gateway",
+    "host": "10.0.1.50",
+    "port": 18789,
+    "token": "your-gateway-token",
+    "is_primary": false
+  }'
+```
+
+```json Response
+{
+  "success": true,
+  "gateway": {
+    "id": 2,
+    "name": "Production Gateway",
+    "host": "10.0.1.50",
+    "port": 18789,
+    "token_set": true,
+    "is_primary": 0,
+    "status": "unknown",
+    "created_at": 1709568000
+  }
+}
+```
+</CodeGroup>
+
+### Setting Primary Gateway
+
+The primary gateway auto-connects on page load:
+
+<CodeGroup>
+```bash PUT /api/gateways
+curl -X PUT "http://localhost:3000/api/gateways" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": 2,
+    "is_primary": 1
+  }'
+```
+
+```typescript UI Logic
+const setPrimary = async (gw: Gateway) => {
+  await fetch('/api/gateways', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: gw.id, is_primary: 1 }),
+  })
+  fetchGateways()
+}
+```
+</CodeGroup>
+
+## WebSocket Connection
+
+Connecting to a gateway establishes a WebSocket:
+
+```typescript
+const connectTo = (gw: Gateway) => {
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  const wsUrl = `${proto}://${gw.host}:${gw.port}`
+  
+  // Token is fetched from database by gateway ID
+  connect(wsUrl, '')
+}
+```
+
+### Connection State
+
+The Zustand store tracks active connection:
+
+```typescript
+interface ConnectionState {
+  isConnected: boolean
+  url: string | null
+  latency: number | null
+  lastPing: number | null
+  error: string | null
+}
+
+const { connection } = useMissionControl()
+
+<div className="flex items-center gap-3">
+  <span className={`w-2.5 h-2.5 rounded-full ${
+    connection.isConnected ? 'bg-green-500' : 'bg-red-500 animate-pulse'
+  }`} />
+  <div>
+    <div className="text-sm font-medium">
+      {connection.isConnected ? 'Connected' : 'Disconnected'}
+    </div>
+    <div className="text-xs text-muted-foreground">
+      {connection.url || 'No active connection'}
+      {connection.latency != null && ` (${connection.latency}ms)`}
+    </div>
+  </div>
+</div>
+```
+
+## Health Monitoring
+
+### Gateway Probing
+
+Probe all gateways to check status and latency:
+
+<CodeGroup>
+```bash POST /api/gateways/health
+curl -X POST "http://localhost:3000/api/gateways/health" \
+  -H "x-api-key: YOUR_API_KEY"
+```
+
+```typescript UI Implementation
+const probeAll = async () => {
+  try {
+    await fetch("/api/gateways/health", { method: "POST" })
+  } catch { /* ignore */ }
+  fetchGateways() // Refresh status
+}
+
+const probeGateway = async (gw: Gateway) => {
+  setProbing(gw.id)
+  await probeAll()
+  setProbing(null)
+}
+```
+</CodeGroup>
+
+### Status Indicators
+
+Gateway cards show real-time status:
+
+```tsx
+function GatewayCard({ gateway, isCurrentlyConnected }) {
+  const statusColors: Record<string, string> = {
+    online: 'bg-green-500',
+    offline: 'bg-red-500',
+    timeout: 'bg-amber-500',
+    unknown: 'bg-muted-foreground/30',
+  }
+
+  const lastSeen = gateway.last_seen
+    ? new Date(gateway.last_seen * 1000).toLocaleString()
+    : 'Never probed'
+
+  return (
+    <div className={`bg-card border rounded-lg p-4 ${
+      isCurrentlyConnected ? 'border-green-500/30 bg-green-500/5' : 'border-border'
+    }`}>
+      <div className="flex items-center gap-2">
+        <span className={`w-2 h-2 rounded-full ${
+          statusColors[gateway.status] || statusColors.unknown
+        }`} />
+        <h3 className="text-sm font-semibold">{gateway.name}</h3>
+        {gateway.is_primary && (
+          <span className="text-2xs px-1.5 py-0.5 rounded bg-primary/20 text-primary border border-primary/30">
+            PRIMARY
+          </span>
+        )}
+        {isCurrentlyConnected && (
+          <span className="text-2xs px-1.5 py-0.5 rounded bg-green-500/20 text-green-400">
+            CONNECTED
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-4 mt-1.5 text-xs text-muted-foreground">
+        <span className="font-mono">{gateway.host}:{gateway.port}</span>
+        <span>Token: {gateway.token_set ? 'Set' : 'None'}</span>
+        {gateway.latency != null && <span>Latency: {gateway.latency}ms</span>}
+        <span>Last: {lastSeen}</span>
+      </div>
+    </div>
+  )
+}
+```
+
+## Direct CLI Connections
+
+CLI tools connect via the `/api/connect` endpoint:
+
+### Registration
+
+<CodeGroup>
+```bash POST /api/connect
+curl -X POST "http://localhost:3000/api/connect" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_name": "codex-session-01",
+    "tool_name": "codex",
+    "tool_version": "2.1.0",
+    "metadata": {
+      "workspace": "/home/user/project",
+      "model": "claude-3-5-sonnet-20241022"
+    }
+  }'
+```
+
+```json Response
+{
+  "success": true,
+  "connection": {
+    "id": 15,
+    "agent_id": 7,
+    "connection_id": "conn-abc123def456",
+    "tool_name": "codex",
+    "tool_version": "2.1.0",
+    "status": "connected",
+    "created_at": 1709568000
+  }
+}
+```
+</CodeGroup>
+
+### Heartbeat
+
+CLI tools send periodic heartbeats:
+
+<CodeGroup>
+```bash POST /api/agents/[id]/heartbeat
+curl -X POST "http://localhost:3000/api/agents/7/heartbeat" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "connection_id": "conn-abc123def456",
+    "tokens": {
+      "input": 1500,
+      "output": 800,
+      "model": "claude-3-5-sonnet-20241022"
+    }
+  }'
+```
+
+```json Response
+{
+  "success": true,
+  "agent": {
+    "id": 7,
+    "status": "active",
+    "last_heartbeat": 1709568120
+  }
+}
+```
+</CodeGroup>
+
+### Disconnection
+
+<CodeGroup>
+```bash DELETE /api/connect
+curl -X DELETE "http://localhost:3000/api/connect" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "connection_id": "conn-abc123def456"
+  }'
+```
+
+```typescript UI Implementation
+const disconnectCli = async (connectionId: string) => {
+  try {
+    await fetch('/api/connect', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ connection_id: connectionId }),
+    })
+    fetchDirectConnections()
+  } catch { /* ignore */ }
+}
+```
+</CodeGroup>
+
+## UI Components
+
+The Multi-Gateway Panel provides full management:
+
+```tsx
+export function MultiGatewayPanel() {
+  const [gateways, setGateways] = useState<Gateway[]>([])
+  const [directConnections, setDirectConnections] = useState<DirectConnection[]>([])
+  const { connection } = useMissionControl()
+  const { connect } = useWebSocket()
+
+  return (
+    <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold">Gateway Manager</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Manage multiple OpenClaw gateway connections
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={probeAll}>Probe All</button>
+          <button onClick={() => setShowAdd(!showAdd)}>+ Add Gateway</button>
+        </div>
+      </div>
+
+      {/* Current Connection Info */}
+      <div className="bg-card border rounded-lg p-4">
+        <ConnectionStatus connection={connection} />
+      </div>
+
+      {/* Add Form */}
+      {showAdd && <AddGatewayForm onAdded={...} onCancel={...} />}
+
+      {/* Gateway List */}
+      <div className="space-y-2">
+        {gateways.map(gw => (
+          <GatewayCard
+            key={gw.id}
+            gateway={gw}
+            isCurrentlyConnected={connection.url?.includes(`:${gw.port}`) ?? false}
+            onSetPrimary={() => setPrimary(gw)}
+            onDelete={() => deleteGateway(gw.id)}
+            onConnect={() => connectTo(gw)}
+            onProbe={() => probeGateway(gw)}
+          />
+        ))}
+      </div>
+
+      {/* Direct CLI Connections */}
+      <div>
+        <h3 className="text-sm font-semibold mb-3">Direct CLI Connections</h3>
+        {directConnections.map(conn => (
+          <DirectConnectionCard
+            key={conn.id}
+            connection={conn}
+            onDisconnect={() => disconnectCli(conn.connection_id)}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+```
+
+## Best Practices
+
+<Tabs>
+  <Tab title="Gateway Setup">
+    - **Name gateways descriptively**: "Production", "Staging", "Dev", not "Gateway 1"
+    - **Set primary for auto-connect**: The primary gateway connects on page load
+    - **Use secure tokens**: Generate strong tokens for production gateways
+    - **Document network topology**: Keep a map of gateway hosts and ports
+  </Tab>
+
+  <Tab title="Health Monitoring">
+    - **Probe regularly**: Use the "Probe All" button or schedule periodic checks
+    - **Monitor latency**: High latency (>100ms) may indicate network issues
+    - **Check last_seen**: Stale timestamps indicate connectivity problems
+    - **Track agent counts**: Verify agents register to expected gateways
+  </Tab>
+
+  <Tab title="Direct Connections">
+    - **Heartbeat frequently**: Send heartbeats every 30-60 seconds
+    - **Include metadata**: Pass workspace, model, and tool info for better tracking
+    - **Report tokens inline**: Use the heartbeat endpoint to report token usage
+    - **Disconnect cleanly**: Always call `DELETE /api/connect` on exit
+  </Tab>
+</Tabs>
+
+## Troubleshooting
+
+<Steps>
+  <Step title="Gateway shows 'offline' status">
+    - Verify gateway is running: `ps aux | grep openclaw`
+    - Check firewall rules allow WebSocket port (default: 18789)
+    - Test connectivity: `telnet <host> <port>`
+    - Review gateway logs for connection errors
+  </Step>
+
+  <Step title="High latency or timeouts">
+    - Check network congestion between Mission Control and gateway
+    - Verify gateway host resources (CPU, memory)
+    - Consider geographic distribution—use local gateways when possible
+    - Review gateway configuration for performance tuning
+  </Step>
+
+  <Step title="Direct connection not appearing">
+    - Verify agent_name matches an existing agent in database
+    - Check API key has `operator` role or higher
+    - Ensure heartbeat is sent within 60 seconds of registration
+    - Review Mission Control logs for auth or validation errors
+  </Step>
+</Steps>
+
+## Related
+
+- [Device Identity](/advanced/device-identity) - Secure gateway authentication
+- [Agent Management](/features/agent-management) - Managing agents across gateways
+- [Gateways API](/api/gateways) - Complete gateway API

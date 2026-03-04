@@ -1,97 +1,261 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: Mission Control Documentation
+description: The open-source dashboard for AI agent orchestration
+mode: custom
 ---
 
-## Setting up
+<div className="relative overflow-hidden bg-gradient-to-br from-[#1e3a8a] via-[#1e40af] to-[#3B82F6] dark:from-[#0f1117] dark:via-[#1a1d27] dark:to-[#1e293b] py-20">
+  <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center opacity-10"></div>
+  <div className="relative max-w-6xl mx-auto px-6 lg:px-8">
+    <div className="grid lg:grid-cols-12 gap-12 items-center">
+      <div className="lg:col-span-7">
+        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-white mb-6">
+          AI Agent Orchestration Dashboard
+        </h1>
+        <p className="text-lg sm:text-xl text-gray-200 dark:text-gray-300 max-w-2xl mb-8">
+          Manage agent fleets, track tasks, monitor costs, and orchestrate workflows — all from a single pane of glass. Built with Next.js, SQLite, and real-time WebSocket monitoring.
+        </p>
+        <div className="flex flex-wrap gap-4">
+          <a
+            href="/quickstart"
+            className="inline-flex items-center px-6 py-3 rounded-lg bg-white dark:bg-[#3B82F6] text-[#1e3a8a] dark:text-white font-semibold hover:bg-gray-100 dark:hover:bg-[#2563EB] transition-colors"
+          >
+            Get Started
+            <svg className="ml-2 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+            </svg>
+          </a>
+          <a
+            href="/api/overview"
+            className="inline-flex items-center px-6 py-3 rounded-lg border border-white/30 bg-white/10 backdrop-blur-sm text-white font-semibold hover:bg-white/20 transition-colors"
+          >
+            API Reference
+          </a>
+        </div>
+      </div>
+      <div className="lg:col-span-5 hidden lg:block">
+        <div className="relative">
+          <div className="absolute inset-0 bg-gradient-to-r from-[#3B82F6] to-[#60A5FA] rounded-2xl blur-3xl opacity-30"></div>
+          <div className="relative bg-[#1a1d27] dark:bg-[#0f1117] rounded-2xl border border-gray-700 dark:border-gray-800 p-6 shadow-2xl">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-3 h-3 rounded-full bg-red-500"></div>
+              <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+              <div className="w-3 h-3 rounded-full bg-green-500"></div>
+            </div>
+            <div className="space-y-3 text-sm font-mono">
+              <div className="text-gray-400 dark:text-gray-500">$ pnpm dev</div>
+              <div className="text-green-400 dark:text-green-500">✓ Mission Control starting...</div>
+              <div className="text-blue-400 dark:text-blue-500">→ Local: http://localhost:3000</div>
+              <div className="text-gray-400 dark:text-gray-500">→ 5 agents online</div>
+              <div className="text-gray-400 dark:text-gray-500">→ 12 tasks in progress</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-Get your documentation site up and running in minutes.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Quick Start</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">Get Mission Control running in minutes</p>
+  
+  <Steps>
+    <Step title="Install dependencies">
+      Mission Control requires Node.js 20+ and pnpm. Install pnpm if you haven't already:
+      
+      ```bash
+      npm install -g pnpm
+      ```
+    </Step>
+    
+    <Step title="Clone and configure">
+      Clone the repository and set up your environment:
+      
+      ```bash
+      git clone https://github.com/builderz-labs/mission-control.git
+      cd mission-control
+      pnpm install
+      cp .env.example .env
+      ```
+      
+      Edit `.env` to set your `AUTH_USER` and `AUTH_PASS` credentials.
+    </Step>
+    
+    <Step title="Start the dashboard">
+      Launch the development server:
+      
+      ```bash
+      pnpm dev
+      ```
+      
+      Open [http://localhost:3000](http://localhost:3000) and log in with your credentials.
+    </Step>
+    
+    <Step title="Connect your first agent">
+      Register an agent via the API or use direct CLI integration:
+      
+      ```bash
+      curl -X POST http://localhost:3000/api/agents \
+        -H "Content-Type: application/json" \
+        -H "x-api-key: YOUR_API_KEY" \
+        -d '{"name": "my-agent", "role": "developer", "status": "online"}'
+      ```
+      
+      Your agent now appears in the dashboard.
+    </Step>
+  </Steps>
+</div>
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Core Features</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">Everything you need to orchestrate AI agents at scale</p>
+  
+  <CardGroup cols={3}>
+    <Card title="Agent Management" icon="robot" href="/features/agent-management">
+      Monitor agent status, spawn sessions, and manage the full agent lifecycle from registration to retirement.
+    </Card>
+    <Card title="Task Board" icon="list-check" href="/features/task-board">
+      Kanban board with drag-and-drop, priorities, assignments, and quality review gates.
+    </Card>
+    <Card title="Real-time Monitoring" icon="chart-line" href="/features/real-time-monitoring">
+      Live activity feed, session inspector, and WebSocket connection for instant event delivery.
+    </Card>
+    <Card title="Cost Tracking" icon="dollar-sign" href="/features/cost-tracking">
+      Token usage dashboard with per-model breakdowns, trend charts, and cost analysis.
+    </Card>
+    <Card title="Background Automation" icon="clock" href="/features/background-automation">
+      Scheduled tasks for backups, cleanup, and heartbeat monitoring.
+    </Card>
+    <Card title="CLI Integration" icon="terminal" href="/integrations/cli-integration">
+      Connect Claude Code, Codex, or any CLI tool directly without requiring a gateway.
+    </Card>
+  </CardGroup>
+</div>
 
-## Make it yours
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Explore by Topic</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">Deep dive into specific areas of Mission Control</p>
+  
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <a href="/integrations/webhooks" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#3B82F6] dark:hover:border-[#3B82F6] overflow-hidden bg-white dark:bg-[#1a1d27] transition-colors no-underline">
+      <div className="p-6">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+          <svg className="w-5 h-5 text-[#3B82F6]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          Webhooks & Integrations
+        </h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          Set up outbound webhooks with delivery history, retry logic, and signature verification.
+        </p>
+        <span className="text-sm text-[#3B82F6] group-hover:text-[#2563EB] font-medium flex items-center gap-1">
+          Learn more
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </span>
+      </div>
+    </a>
+    
+    <a href="/advanced/pipeline-orchestration" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#3B82F6] dark:hover:border-[#3B82F6] overflow-hidden bg-white dark:bg-[#1a1d27] transition-colors no-underline">
+      <div className="p-6">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+          <svg className="w-5 h-5 text-[#3B82F6]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+          </svg>
+          Pipeline Orchestration
+        </h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          Build and execute multi-agent workflows with workflow templates and pipeline management.
+        </p>
+        <span className="text-sm text-[#3B82F6] group-hover:text-[#2563EB] font-medium flex items-center gap-1">
+          Learn more
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </span>
+      </div>
+    </a>
+    
+    <a href="/advanced/agent-soul-system" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#3B82F6] dark:hover:border-[#3B82F6] overflow-hidden bg-white dark:bg-[#1a1d27] transition-colors no-underline">
+      <div className="p-6">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+          <svg className="w-5 h-5 text-[#3B82F6]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+          </svg>
+          Agent SOUL System
+        </h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          Define agent personality, capabilities, and behavioral guidelines with bidirectional workspace sync.
+        </p>
+        <span className="text-sm text-[#3B82F6] group-hover:text-[#2563EB] font-medium flex items-center gap-1">
+          Learn more
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </span>
+      </div>
+    </a>
+    
+    <a href="/deployment/security" className="group block rounded-2xl border border-gray-200 dark:border-[#27272a] hover:border-[#3B82F6] dark:hover:border-[#3B82F6] overflow-hidden bg-white dark:bg-[#1a1d27] transition-colors no-underline">
+      <div className="p-6">
+        <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+          <svg className="w-5 h-5 text-[#3B82F6]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+          Security & Access Control
+        </h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+          Role-based access control, device identity, and production deployment security guidelines.
+        </p>
+        <span className="text-sm text-[#3B82F6] group-hover:text-[#2563EB] font-medium flex items-center gap-1">
+          Learn more
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </span>
+      </div>
+    </a>
+  </div>
+</div>
 
-Design a docs site that looks great and empowers your users.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Resources</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">Additional resources to help you get the most out of Mission Control</p>
+  
+  <CardGroup cols={2}>
+    <Card title="API Reference" icon="code" href="/api/overview">
+      Complete API documentation with request/response schemas, authentication, and examples.
+    </Card>
+    <Card title="Deployment Guide" icon="server" href="/deployment/production">
+      Production deployment with Docker, environment variables, and security best practices.
+    </Card>
+    <Card title="GitHub Repository" icon="github" href="https://github.com/builderz-labs/mission-control">
+      View source code, report issues, and contribute to the project.
+    </Card>
+    <Card title="OpenClaw Integration" icon="link" href="/integrations/openclaw-gateway">
+      Connect Mission Control to OpenClaw gateways for advanced agent orchestration.
+    </Card>
+  </CardGroup>
+</div>
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
-
-## Create beautiful pages
-
-Everything you need to create world-class documentation.
-
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
-
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<div className="mt-20 mb-16 max-w-5xl mx-auto px-6">
+  <div className="rounded-2xl bg-gradient-to-r from-[#3B82F6] to-[#2563EB] dark:from-[#1e3a8a] dark:to-[#1e40af] p-8 md:p-12 text-center">
+    <h2 className="text-2xl md:text-3xl font-bold text-white mb-4">
+      Ready to orchestrate your agent fleet?
+    </h2>
+    <p className="text-lg text-gray-100 dark:text-gray-200 max-w-2xl mx-auto mb-8">
+      Get started with Mission Control today and bring all your AI agents under unified management.
+    </p>
+    <a
+      href="/quickstart"
+      className="inline-flex items-center px-6 py-3 rounded-lg bg-white dark:bg-gray-900 text-[#3B82F6] dark:text-white font-semibold hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+    >
+      Get Started
+      <svg className="ml-2 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+      </svg>
+    </a>
+  </div>
+</div>

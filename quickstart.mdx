@@ -1,80 +1,259 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get Mission Control running in 5 minutes and register your first agent.
 ---
 
-## Get started in three steps
+<Note>
+This quickstart assumes you have Node.js 20+ and pnpm installed. See [Installation](/installation) for detailed prerequisites.
+</Note>
 
-Get your documentation site running locally and make your first customization.
+## Get Started in 3 Steps
 
-### Step 1: Set up your local environment
+<Steps>
+  <Step title="Clone and Install">
+    Clone the repository and install dependencies:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```bash
+    git clone https://github.com/builderz-labs/mission-control.git
+    cd mission-control
+    pnpm install
+    ```
 
-### Step 2: Deploy your changes
+    <Info>
+    Mission Control requires **pnpm** for dependency management. Install with `npm install -g pnpm` or enable corepack with `corepack enable`.
+    </Info>
+  </Step>
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+  <Step title="Configure Environment">
+    Copy the example environment file and edit with your credentials:
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    ```bash
+    cp .env.example .env
+    ```
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    Edit `.env` with your preferred text editor. At minimum, set these values:
 
-### Step 3: Go live
+    ```bash .env
+    # Admin credentials (seeded on first run)
+    AUTH_USER=admin
+    AUTH_PASS=your-secure-password
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    # API key for programmatic access
+    API_KEY=generate-a-random-key-here
 
-## Next steps
+    # Network access (allows localhost by default)
+    MC_ALLOWED_HOSTS=localhost,127.0.0.1
+    ```
 
-Now that you have your docs running, explore these key features:
+    <Warning>
+    Change default credentials before deploying to production. The `AUTH_USER` and `AUTH_PASS` are only used to seed the initial admin account on first run.
+    </Warning>
 
-<CardGroup cols={2}>
+    If your password contains `#`, either quote it or use base64 encoding:
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+    <CodeGroup>
+    ```bash Quoted Password
+    AUTH_PASS="my#password"
+    ```
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+    ```bash Base64 Encoded
+    AUTH_PASS_B64=$(echo -n 'my#password' | base64)
+    ```
+    </CodeGroup>
+  </Step>
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+  <Step title="Start the Server">
+    Launch the development server:
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+    ```bash
+    pnpm dev
+    ```
 
+    Open your browser to [http://localhost:3000](http://localhost:3000) and login with your `AUTH_USER` and `AUTH_PASS` credentials.
+
+    <Info>
+    The dev server binds to `127.0.0.1:3000` by default. Production builds use `0.0.0.0:3005`. See [Installation](/installation) for production configuration.
+    </Info>
+  </Step>
+</Steps>
+
+## Register Your First Agent
+
+Once logged in, register an agent to start tracking sessions and tasks:
+
+<Steps>
+  <Step title="Open Agent Panel">
+    Click **Agents** in the left navigation rail. You'll see the agent management panel.
+  </Step>
+
+  <Step title="Create Agent via API">
+    Use the API to register your first agent:
+
+    ```bash
+    curl -X POST http://localhost:3000/api/agents \
+      -H "Content-Type: application/json" \
+      -H "x-api-key: YOUR_API_KEY" \
+      -d '{
+        "name": "my-first-agent",
+        "role": "developer",
+        "status": "online"
+      }'
+    ```
+
+    Response:
+
+    ```json
+    {
+      "agent": {
+        "id": 1,
+        "name": "my-first-agent",
+        "role": "developer",
+        "status": "online",
+        "created_at": 1709596800,
+        "taskStats": {
+          "total": 0,
+          "assigned": 0,
+          "in_progress": 0,
+          "completed": 0
+        }
+      }
+    }
+    ```
+
+    <Info>
+    The agent appears immediately in the dashboard via Server-Sent Events (SSE). No page refresh required.
+    </Info>
+  </Step>
+
+  <Step title="View in Dashboard">
+    Return to the Agents panel in your browser. Your new agent appears in the list with status badge, role, and task statistics.
+
+    Click on the agent to view details including:
+    - Session key and configuration
+    - Task assignments and history
+    - Heartbeat status and last seen timestamp
+    - SOUL content (if configured)
+  </Step>
+</Steps>
+
+## Connect a CLI Tool (Optional)
+
+Mission Control supports direct CLI integration without requiring a gateway. Connect tools like Claude Code or custom agents:
+
+```bash
+curl -X POST http://localhost:3000/api/connect \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{
+    "tool_name": "claude-code",
+    "tool_version": "1.0.0",
+    "agent_name": "my-first-agent",
+    "agent_role": "developer"
+  }'
+```
+
+Response includes URLs for heartbeats, events, and token reporting:
+
+```json
+{
+  "connection_id": "550e8400-e29b-41d4-a716-446655440000",
+  "agent_id": 1,
+  "agent_name": "my-first-agent",
+  "status": "connected",
+  "sse_url": "/api/events",
+  "heartbeat_url": "/api/agents/1/heartbeat",
+  "token_report_url": "/api/tokens"
+}
+```
+
+### Send Heartbeats
+
+Keep the connection alive by sending heartbeats every 30 seconds:
+
+```bash
+curl -X POST http://localhost:3000/api/agents/1/heartbeat \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{
+    "connection_id": "550e8400-e29b-41d4-a716-446655440000",
+    "token_usage": {
+      "model": "claude-sonnet-4",
+      "inputTokens": 1500,
+      "outputTokens": 800
+    }
+  }'
+```
+
+<Info>
+Heartbeats can include optional token usage for inline cost tracking. Mission Control automatically calculates costs based on current model pricing.
+</Info>
+
+## Create a Task
+
+Create and assign tasks to agents:
+
+```bash
+curl -X POST http://localhost:3000/api/tasks \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{
+    "title": "Implement user authentication",
+    "description": "Add JWT-based authentication to the API",
+    "priority": "high",
+    "assigned_to": "my-first-agent",
+    "status": "todo"
+  }'
+```
+
+The task appears on the Kanban board and in the agent's work queue. The agent receives notification via SSE if subscribed to `/api/events`.
+
+## View the Dashboard
+
+Explore Mission Control's 28 panels:
+
+<CardGroup cols={3}>
+  <Card title="Overview" icon="gauge">
+    System status, active agents, and key metrics
+  </Card>
+  <Card title="Tasks" icon="list-check">
+    Kanban board with drag-and-drop workflow
+  </Card>
+  <Card title="Agents" icon="robot">
+    Agent fleet management and lifecycle
+  </Card>
+  <Card title="Sessions" icon="terminal">
+    Active gateway sessions and connections
+  </Card>
+  <Card title="Tokens" icon="coins">
+    Usage tracking and cost analysis
+  </Card>
+  <Card title="Memory" icon="brain">
+    Agent memory browser and search
+  </Card>
+  <Card title="Logs" icon="file-lines">
+    Centralized log viewer with filtering
+  </Card>
+  <Card title="Chat" icon="comments">
+    Agent communication interface
+  </Card>
+  <Card title="Pipelines" icon="diagram-project">
+    Workflow orchestration and templates
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation Guide" icon="download" href="/installation">
+    Production deployment and environment configuration
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference">
+    Complete API documentation for all 66 endpoints
+  </Card>
+  <Card title="Agent Integration" icon="plug" href="/integrations">
+    Connect OpenClaw, Claude Code, and custom agents
+  </Card>
+  <Card title="Security" icon="shield" href="/security">
+    Authentication, authorization, and security best practices
+  </Card>
+</CardGroup>

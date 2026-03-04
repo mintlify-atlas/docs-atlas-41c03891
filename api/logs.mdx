@@ -1,0 +1,378 @@
+---
+title: Logs API
+description: Access system logs from OpenClaw agents and gateway processes
+---
+
+## Overview
+
+The Logs API provides access to structured log files from OpenClaw agents, gateway processes, and Mission Control itself. Logs are automatically discovered from the configured logs directory and parsed into a unified format.
+
+<Note>
+Logs are read from the filesystem at `$LOGS_DIR` (configured in environment). Multiple log formats are supported including JSON, pipe-delimited, and journal formats.
+</Note>
+
+## Get Recent Logs
+
+### GET /api/logs?action=recent
+
+Retrieve recent log entries with optional filtering.
+
+#### Query Parameters
+
+<ParamField query="action" type="string" default="recent">
+  Action to perform: `recent`, `sources`, or `tail`
+</ParamField>
+
+<ParamField query="limit" type="integer" default="100">
+  Number of log entries to return (max 200)
+</ParamField>
+
+<ParamField query="level" type="string">
+  Filter by log level: `info`, `warn`, `error`, `debug`
+</ParamField>
+
+<ParamField query="source" type="string">
+  Filter by log source (e.g., `gateway`, `automation/monitor`, agent name)
+</ParamField>
+
+<ParamField query="session" type="string">
+  Filter by session ID (for gateway logs)
+</ParamField>
+
+<ParamField query="search" type="string">
+  Search term to filter messages (case-insensitive)
+</ParamField>
+
+#### Response
+
+<ResponseField name="logs" type="array">
+  Array of log entries
+  
+  <ResponseField name="id" type="string">
+    Unique log entry identifier
+  </ResponseField>
+  
+  <ResponseField name="timestamp" type="integer">
+    Unix timestamp (milliseconds)
+  </ResponseField>
+  
+  <ResponseField name="level" type="string">
+    Log level: `info`, `warn`, `error`, `debug`
+  </ResponseField>
+  
+  <ResponseField name="source" type="string">
+    Log source (file name or agent identifier)
+  </ResponseField>
+  
+  <ResponseField name="session" type="string" optional>
+    Session ID (if applicable)
+  </ResponseField>
+  
+  <ResponseField name="message" type="string">
+    Log message
+  </ResponseField>
+  
+  <ResponseField name="data" type="object" optional>
+    Additional structured data (if available)
+  </ResponseField>
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X GET "https://your-instance.com/api/logs?level=error&limit=50" \
+  -H "Cookie: mc-session=your-session-token"
+```
+
+```javascript fetch
+const response = await fetch('/api/logs?source=gateway&level=warn');
+const { logs } = await response.json();
+console.log(`Found ${logs.length} warnings`);
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'https://your-instance.com/api/logs',
+    params={
+        'action': 'recent',
+        'search': 'timeout',
+        'limit': 100
+    },
+    cookies={'mc-session': 'your-session-token'}
+)
+logs = response.json()['logs']
+```
+
+</CodeGroup>
+
+### Response Example
+
+```json
+{
+  "logs": [
+    {
+      "id": "gateway-1709823456789-a3c9f2",
+      "timestamp": 1709823456789,
+      "level": "error",
+      "source": "gateway",
+      "session": "session-42",
+      "message": "Model request failed: timeout after 30s",
+      "data": {
+        "model": "gpt-4",
+        "retries": 3
+      }
+    },
+    {
+      "id": "automation/monitor-1709823123456-b4d1a8",
+      "timestamp": 1709823123456,
+      "level": "info",
+      "source": "automation/monitor",
+      "message": "Consistency check completed"
+    },
+    {
+      "id": "DataAnalyst-1709822987654-c2e5f9",
+      "timestamp": 1709822987654,
+      "level": "warn",
+      "source": "DataAnalyst",
+      "message": "Large dataset detected, processing may take longer"
+    }
+  ]
+}
+```
+
+## List Available Sources
+
+### GET /api/logs?action=sources
+
+Discover all available log sources.
+
+<CodeGroup>
+
+```bash curl
+curl -X GET "https://your-instance.com/api/logs?action=sources" \
+  -H "Cookie: mc-session=your-session-token"
+```
+
+```javascript fetch
+const response = await fetch('/api/logs?action=sources');
+const { sources } = await response.json();
+console.log('Available sources:', sources);
+```
+
+</CodeGroup>
+
+### Response Example
+
+```json
+{
+  "sources": [
+    "gateway",
+    "automation/monitor",
+    "automation/scheduler",
+    "DataAnalyst",
+    "CodeReviewer"
+  ]
+}
+```
+
+## Tail Logs (Real-Time)
+
+### GET /api/logs?action=tail
+
+Get new logs since a specific timestamp for real-time monitoring.
+
+#### Query Parameters
+
+<ParamField query="action" type="string" required>
+  Set to `tail`
+</ParamField>
+
+<ParamField query="since" type="integer" required>
+  Unix timestamp (milliseconds). Returns only logs after this time.
+</ParamField>
+
+<ParamField query="source" type="string" optional>
+  Filter by specific source
+</ParamField>
+
+<ParamField query="limit" type="integer" default="100">
+  Maximum entries to return
+</ParamField>
+
+<CodeGroup>
+
+```bash curl
+curl -X GET "https://your-instance.com/api/logs?action=tail&since=1709823000000" \
+  -H "Cookie: mc-session=your-session-token"
+```
+
+```javascript fetch
+// Real-time log monitoring
+let lastTimestamp = Date.now();
+
+setInterval(async () => {
+  const response = await fetch(
+    `/api/logs?action=tail&since=${lastTimestamp}`
+  );
+  const { logs } = await response.json();
+  
+  if (logs.length > 0) {
+    logs.forEach(log => console.log(`[${log.level}] ${log.message}`));
+    lastTimestamp = logs[0].timestamp;
+  }
+}, 3000);
+```
+
+</CodeGroup>
+
+## Add Custom Log Entry
+
+### POST /api/logs
+
+Create a custom log entry (requires operator role).
+
+#### Request Body
+
+<ParamField body="action" type="string" required>
+  Set to `add`
+</ParamField>
+
+<ParamField body="message" type="string" required>
+  Log message
+</ParamField>
+
+<ParamField body="level" type="string" default="info">
+  Log level: `info`, `warn`, `error`, `debug`
+</ParamField>
+
+<ParamField body="source" type="string" default="mission-control">
+  Custom source identifier
+</ParamField>
+
+<ParamField body="session" type="string" optional>
+  Session ID to associate with log
+</ParamField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST "https://your-instance.com/api/logs" \
+  -H "Cookie: mc-session=your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "add",
+    "message": "Custom deployment started",
+    "level": "info",
+    "source": "deployment-script"
+  }'
+```
+
+```javascript fetch
+const response = await fetch('/api/logs', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    action: 'add',
+    message: 'Custom event occurred',
+    level: 'warn',
+    source: 'my-integration'
+  })
+});
+
+const { success, entry } = await response.json();
+```
+
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "success": true,
+  "entry": {
+    "id": "custom-1709823456789-d3f4g5",
+    "timestamp": 1709823456789,
+    "level": "info",
+    "source": "deployment-script",
+    "message": "Custom deployment started",
+    "data": null
+  }
+}
+```
+
+## Log Format Detection
+
+The Logs API automatically parses multiple log formats:
+
+### JSON Format
+```json
+{"timestamp":1709823456789,"level":"info","message":"Task completed","data":{...}}
+```
+
+### Pipe-Delimited Format
+```
+2026-03-07T14:30:56+01:00|INFO|Consistency check completed
+2026-03-07T14:30:57+01:00|ERROR|Connection failed
+```
+
+### Gateway Journal Format
+```
+2026-03-07T14:30:56+01:00 hostname openclaw[12345]: Model request completed
+```
+
+### Simple Text with ISO Timestamp
+```
+2026-03-07T14:30:56.789Z [INFO] Processing started
+2026-03-07T14:30:57.123Z [ERROR] Failed to connect
+```
+
+## Use Cases
+
+### Monitor Errors Across All Sources
+
+```javascript
+const response = await fetch('/api/logs?level=error&limit=100');
+const { logs } = await response.json();
+
+const errorsBySource = logs.reduce((acc, log) => {
+  acc[log.source] = (acc[log.source] || 0) + 1;
+  return acc;
+}, {});
+
+console.log('Errors by source:', errorsBySource);
+```
+
+### Track Gateway Session Issues
+
+```javascript
+const sessionId = 'session-42';
+const response = await fetch(
+  `/api/logs?source=gateway&session=${sessionId}&level=warn`
+);
+const { logs } = await response.json();
+```
+
+### Search for Specific Events
+
+```javascript
+const response = await fetch(
+  '/api/logs?search=timeout&limit=50'
+);
+const { logs } = await response.json();
+```
+
+## Error Responses
+
+<ResponseField name="error" type="string">
+  Error message
+</ResponseField>
+
+| Status Code | Description |
+|------------|-------------|
+| 400 | Bad request - Invalid parameters |
+| 401 | Unauthorized - Invalid or missing session |
+| 403 | Forbidden - Insufficient permissions (operator required for POST) |
+| 429 | Rate limited |
+| 500 | Internal server error |

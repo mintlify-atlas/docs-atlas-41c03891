@@ -1,0 +1,254 @@
+---
+title: 'Scheduler API'
+description: 'Monitor and control scheduled background tasks'
+icon: 'clock'
+---
+
+<Warning>
+All scheduler endpoints require **admin** role. Unauthorized users will receive a 403 Forbidden response.
+</Warning>
+
+## Overview
+
+The Scheduler API provides visibility into Mission Control's background task system. The scheduler runs several automated maintenance tasks:
+
+- **Auto Backup** - Daily database backups at 3:00 AM UTC
+- **Auto Cleanup** - Daily data pruning at 4:00 AM UTC based on retention policies
+- **Agent Heartbeat** - Agent liveness checks every 5 minutes
+- **Webhook Retry** - Failed webhook delivery retries every 60 seconds
+- **Claude Session Scan** - Active session monitoring every 60 seconds
+
+## Get Scheduler Status
+
+Returns the current state of all scheduled tasks including next run times and last execution results.
+
+<CodeGroup>
+```bash cURL
+curl -X GET https://your-domain.com/api/scheduler \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN"
+```
+
+```javascript JavaScript
+const response = await fetch('/api/scheduler', {
+  credentials: 'include'
+});
+const { tasks } = await response.json();
+console.log(tasks);
+```
+</CodeGroup>
+
+### Response
+
+<ResponseField name="tasks" type="array">
+  Array of scheduled task status objects
+  
+  <ResponseField name="id" type="string" required>
+    Task identifier (`auto_backup`, `auto_cleanup`, `agent_heartbeat`, `webhook_retry`, `claude_session_scan`)
+  </ResponseField>
+  
+  <ResponseField name="name" type="string" required>
+    Human-readable task name
+  </ResponseField>
+  
+  <ResponseField name="enabled" type="boolean" required>
+    Whether the task is currently enabled (controlled via settings)
+  </ResponseField>
+  
+  <ResponseField name="lastRun" type="integer">
+    Unix timestamp (milliseconds) of last execution, or null if never run
+  </ResponseField>
+  
+  <ResponseField name="nextRun" type="integer" required>
+    Unix timestamp (milliseconds) of next scheduled execution
+  </ResponseField>
+  
+  <ResponseField name="running" type="boolean" required>
+    Whether the task is currently executing
+  </ResponseField>
+  
+  <ResponseField name="lastResult" type="object">
+    Result of the most recent execution
+    
+    <ResponseField name="ok" type="boolean" required>
+      Whether the task succeeded
+    </ResponseField>
+    
+    <ResponseField name="message" type="string" required>
+      Result message (e.g., "Backup created (2048KB)" or error details)
+    </ResponseField>
+    
+    <ResponseField name="timestamp" type="integer" required>
+      When this result was generated (milliseconds)
+    </ResponseField>
+  </ResponseField>
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "tasks": [
+    {
+      "id": "auto_backup",
+      "name": "Auto Backup",
+      "enabled": true,
+      "lastRun": 1709524800000,
+      "nextRun": 1709611200000,
+      "running": false,
+      "lastResult": {
+        "ok": true,
+        "message": "Backup created (2048KB)",
+        "timestamp": 1709524800000
+      }
+    },
+    {
+      "id": "agent_heartbeat",
+      "name": "Agent Heartbeat Check",
+      "enabled": true,
+      "lastRun": 1709524500000,
+      "nextRun": 1709524800000,
+      "running": false,
+      "lastResult": {
+        "ok": true,
+        "message": "All agents healthy",
+        "timestamp": 1709524500000
+      }
+    }
+  ]
+}
+```
+
+## Trigger Scheduled Task
+
+Manually execute a scheduled task immediately, bypassing the normal schedule. Useful for testing or running on-demand backups.
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://your-domain.com/api/scheduler \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"task_id": "auto_backup"}'
+```
+
+```javascript JavaScript
+const response = await fetch('/api/scheduler', {
+  method: 'POST',
+  credentials: 'include',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ task_id: 'auto_backup' })
+});
+const result = await response.json();
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="task_id" type="string" required>
+  Task to trigger. Must be one of:
+  - `auto_backup` - Create database backup immediately
+  - `auto_cleanup` - Run data cleanup based on retention policies
+  - `agent_heartbeat` - Check agent liveness and mark stale agents offline
+</ParamField>
+
+### Response
+
+<ResponseField name="ok" type="boolean" required>
+  Whether the task executed successfully
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Result message with execution details or error information
+</ResponseField>
+
+### Example Responses
+
+**Successful Backup**
+```json
+{
+  "ok": true,
+  "message": "Backup created (2048KB)"
+}
+```
+
+**Cleanup Result**
+```json
+{
+  "ok": true,
+  "message": "Cleaned 342 stale records"
+}
+```
+
+**Heartbeat Check**
+```json
+{
+  "ok": true,
+  "message": "Marked 2 agent(s) offline: agent-alpha, agent-beta"
+}
+```
+
+## Cron Configuration
+
+### Backup Schedule
+- **Frequency**: Daily at 3:00 AM UTC
+- **Interval**: 24 hours
+- **Control Setting**: `general.auto_backup` (boolean)
+- **Retention**: Keeps last N backups (configured via `general.backup_retention_count`)
+
+### Cleanup Schedule
+- **Frequency**: Daily at 4:00 AM UTC
+- **Interval**: 24 hours
+- **Control Setting**: `general.auto_cleanup` (boolean)
+- **Target Tables**: activities, audit_log, notifications, pipeline_runs, token_usage
+- **Retention Policies**: Configured per table via `retention.*` settings
+
+### Agent Heartbeat
+- **Frequency**: Every 5 minutes
+- **Control Setting**: `general.agent_heartbeat` (default: enabled)
+- **Timeout**: Configurable via `general.agent_timeout_minutes` (default: 10)
+- **Action**: Marks agents offline if no heartbeat received within timeout period
+
+### Webhook Retry
+- **Frequency**: Every 60 seconds
+- **Control Setting**: `webhooks.retry_enabled` (default: enabled)
+- **Purpose**: Retry failed webhook deliveries with exponential backoff
+
+### Claude Session Scan
+- **Frequency**: Every 60 seconds
+- **Control Setting**: `general.claude_session_scan` (default: enabled)
+- **Purpose**: Monitor and sync active Claude Desktop sessions
+
+## Enabling/Disabling Tasks
+
+Tasks are controlled via the Settings API. Use the settings keys listed in each task's "Control Setting" field.
+
+```bash
+# Enable auto backup
+curl -X PUT https://your-domain.com/api/settings \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"settings": {"general.auto_backup": "true"}}'
+
+# Disable auto cleanup
+curl -X PUT https://your-domain.com/api/settings \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"settings": {"general.auto_cleanup": "false"}}'
+```
+
+## Error Responses
+
+<ResponseField name="400 Bad Request">
+  Invalid task_id provided. Must be one of: auto_backup, auto_cleanup, agent_heartbeat
+</ResponseField>
+
+<ResponseField name="401 Unauthorized">
+  User is not authenticated. Check session cookie.
+</ResponseField>
+
+<ResponseField name="403 Forbidden">
+  User does not have admin role. Only admins can control the scheduler.
+</ResponseField>
+
+<ResponseField name="500 Internal Server Error">
+  Task execution failed. Check the response message for error details.
+</ResponseField>

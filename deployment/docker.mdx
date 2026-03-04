@@ -1,0 +1,335 @@
+---
+title: Docker Deployment
+description: Deploy Mission Control using Docker and Docker Compose
+---
+
+Mission Control provides production-ready Docker images with multi-stage builds, native SQLite compilation, and minimal attack surface.
+
+## Quick Start
+
+<Steps>
+  <Step title="Build the image">
+    ```bash
+    docker build -t mission-control .
+    ```
+    
+    The Dockerfile uses a multi-stage build:
+    - **Stage 1 (deps):** Installs dependencies and compiles native modules
+    - **Stage 2 (build):** Builds Next.js production bundle
+    - **Stage 3 (runtime):** Minimal runtime image with only production artifacts
+  </Step>
+  
+  <Step title="Run the container">
+    ```bash
+    docker run -p 3000:3000 \
+      -v mission-control-data:/app/.data \
+      -e AUTH_USER=admin \
+      -e AUTH_PASS=your-secure-password \
+      -e API_KEY=your-api-key \
+      mission-control
+    ```
+    
+    <Note>
+      The container runs as non-root user `nextjs` (UID 1001) for security.
+    </Note>
+  </Step>
+  
+  <Step title="Access the dashboard">
+    Open http://localhost:3000 and login with your configured credentials.
+  </Step>
+</Steps>
+
+## Docker Compose
+
+For persistent deployments, use Docker Compose:
+
+<CodeGroup>
+```yaml docker-compose.yml
+services:
+  mission-control:
+    build: .
+    ports:
+      - "3000:3000"
+    env_file: .env
+    volumes:
+      - mc-data:/app/.data
+    restart: unless-stopped
+
+volumes:
+  mc-data:
+```
+
+```bash .env
+AUTH_USER=admin
+AUTH_PASS=your-secure-password
+API_KEY=your-api-key
+MC_ALLOWED_HOSTS=localhost,127.0.0.1,yourdomain.com
+```
+</CodeGroup>
+
+**Start the stack:**
+
+```bash
+docker compose up -d
+```
+
+**View logs:**
+
+```bash
+docker compose logs -f mission-control
+```
+
+**Stop the stack:**
+
+```bash
+docker compose down
+```
+
+## Dockerfile Architecture
+
+The production Dockerfile (39 lines) implements security and efficiency best practices:
+
+### Stage 1: Dependencies
+
+```dockerfile
+FROM node:20-slim AS base
+RUN corepack enable && corepack prepare pnpm@latest --activate
+WORKDIR /app
+
+FROM base AS deps
+COPY package.json ./
+COPY . .
+# better-sqlite3 requires native compilation tools
+RUN apt-get update && apt-get install -y python3 make g++ --no-install-recommends && rm -rf /var/lib/apt/lists/*
+RUN if [ -f pnpm-lock.yaml ]; then \
+      pnpm install --frozen-lockfile; \
+    else \
+      echo "WARN: pnpm-lock.yaml not found in build context; running non-frozen install"; \
+      pnpm install --no-frozen-lockfile; \
+    fi
+```
+
+**Key features:**
+- Uses `node:20-slim` for minimal base image
+- Installs build tools (`python3`, `make`, `g++`) for `better-sqlite3` native compilation
+- Handles missing lockfile gracefully with warning
+- Cleans up apt cache to reduce layer size
+
+### Stage 2: Build
+
+```dockerfile
+FROM base AS build
+COPY --from=deps /app ./
+RUN pnpm build
+```
+
+Builds Next.js with standalone output (configured in `next.config.js`).
+
+### Stage 3: Runtime
+
+```dockerfile
+FROM node:20-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
+COPY --from=build /app/.next/standalone ./
+COPY --from=build /app/.next/static ./.next/static
+COPY --from=build /app/public* ./public/
+# Create data directory with correct ownership for SQLite
+RUN mkdir -p .data && chown nextjs:nodejs .data
+RUN apt-get update && apt-get install -y curl --no-install-recommends && rm -rf /var/lib/apt/lists/*
+USER nextjs
+EXPOSE 3000
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:3000/login || exit 1
+CMD ["node", "server.js"]
+```
+
+**Security features:**
+- Runs as non-root user `nextjs` (UID 1001)
+- Only includes runtime artifacts (no source code, build tools, or dev dependencies)
+- Pre-creates `.data` directory with correct ownership
+- Includes health check for orchestration platforms
+- Installs only `curl` for health checks
+
+## Persistent Data
+
+Mission Control stores all state in SQLite under `/app/.data/` inside the container:
+
+- `mission-control.db` - Main database
+- `mission-control-tokens.json` - Token storage
+- Logs and temporary files
+
+<Warning>
+  **Always mount a volume to `/app/.data`** to persist data across container restarts:
+  
+  ```bash
+  docker run -v mission-control-data:/app/.data ...
+  ```
+  
+  Without a volume, all data will be lost when the container is removed.
+</Warning>
+
+### Volume Backup
+
+Back up the SQLite database:
+
+```bash
+# Stop the container
+docker compose down
+
+# Backup the volume
+docker run --rm -v mc-data:/data -v $(pwd):/backup ubuntu tar czf /backup/mc-backup.tar.gz -C /data .
+
+# Restart
+docker compose up -d
+```
+
+### Volume Restore
+
+```bash
+# Stop the container
+docker compose down
+
+# Restore the volume
+docker run --rm -v mc-data:/data -v $(pwd):/backup ubuntu tar xzf /backup/mc-backup.tar.gz -C /data
+
+# Restart
+docker compose up -d
+```
+
+## Configuration
+
+Pass environment variables via:
+
+1. **Command line:**
+   ```bash
+   docker run -e AUTH_USER=admin -e AUTH_PASS=secret ...
+   ```
+
+2. **Env file:**
+   ```bash
+   docker run --env-file .env ...
+   ```
+
+3. **Docker Compose:**
+   ```yaml
+   services:
+     mission-control:
+       env_file: .env
+       environment:
+         - MC_COOKIE_SECURE=true
+   ```
+
+See [Environment Variables](/deployment/environment-variables) for the complete reference.
+
+## Port Configuration
+
+The container exposes port `3000` by default. Override with the `PORT` environment variable:
+
+```bash
+docker run -p 8080:8080 -e PORT=8080 mission-control
+```
+
+<Note>
+  The `HOSTNAME` is set to `0.0.0.0` in the Dockerfile to accept connections from all interfaces inside the container.
+</Note>
+
+## Health Checks
+
+The image includes a built-in health check that queries `/login` every 30 seconds:
+
+```dockerfile
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:3000/login || exit 1
+```
+
+**Check health status:**
+
+```bash
+docker inspect --format='{{.State.Health.Status}}' <container-id>
+```
+
+## Production Checklist
+
+<Steps>
+  <Step title="Set secure credentials">
+    ```bash
+    AUTH_PASS=$(openssl rand -base64 32)
+    API_KEY=$(openssl rand -hex 32)
+    ```
+  </Step>
+  
+  <Step title="Configure host access control">
+    ```bash
+    MC_ALLOWED_HOSTS=yourdomain.com,*.internal.example.com
+    ```
+    
+    See [Security](/deployment/security#network-access-control) for details.
+  </Step>
+  
+  <Step title="Enable secure cookies">
+    ```bash
+    MC_COOKIE_SECURE=true
+    ```
+    
+    Required when serving over HTTPS.
+  </Step>
+  
+  <Step title="Mount persistent volume">
+    ```bash
+    docker run -v mission-control-data:/app/.data ...
+    ```
+  </Step>
+  
+  <Step title="Configure restart policy">
+    ```bash
+    docker run --restart=unless-stopped ...
+    ```
+    
+    Or in Docker Compose:
+    ```yaml
+    restart: unless-stopped
+    ```
+  </Step>
+  
+  <Step title="Set up backups">
+    Schedule regular backups of the `/app/.data` volume.
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### "pnpm-lock.yaml not found" warning
+
+The Dockerfile gracefully handles missing lockfiles by falling back to `pnpm install --no-frozen-lockfile`.
+
+For reproducible builds, include `pnpm-lock.yaml` in your build context.
+
+### Permission denied on .data directory
+
+The container runs as user `nextjs` (UID 1001). If mounting a host directory:
+
+```bash
+mkdir -p ./data
+chown -R 1001:1001 ./data
+docker run -v ./data:/app/.data ...
+```
+
+### Database locked errors
+
+Ensure only one container is running against the same volume:
+
+```bash
+docker ps -a | grep mission-control
+```
+
+SQLite uses WAL mode but does not support multiple writers.
+
+### Invalid ELF header
+
+Native binaries are compiled for Linux x64 inside the container. Do not build on macOS and deploy on Linux or vice versa.
+
+Always build the Docker image on the target platform or use multi-arch builds.

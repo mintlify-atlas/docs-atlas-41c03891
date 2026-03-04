@@ -1,0 +1,277 @@
+---
+title: 'Backup API'
+description: 'Create, list, and manage database backups'
+icon: 'database'
+---
+
+<Warning>
+All backup endpoints require **admin** role. Unauthorized users will receive a 403 Forbidden response.
+</Warning>
+
+## Overview
+
+The Backup API provides manual database backup management. Backups are SQLite database snapshots stored in the `backups/` directory adjacent to the main database.
+
+Backup files are named `mc-backup-YYYY-MM-DD_HH-MM-SS.db` and are automatically pruned to maintain the configured retention count (default: 10 backups).
+
+## Database Backup Procedure
+
+Mission Control uses SQLite's built-in backup API to create consistent point-in-time snapshots:
+
+1. Backup is initiated via API or scheduler
+2. SQLite performs a hot backup (database remains online)
+3. Backup file is written to `backups/mc-backup-{timestamp}.db`
+4. File size and path are logged to audit trail
+5. Old backups are automatically pruned if count exceeds retention limit
+6. Response includes backup metadata (name, size, timestamp)
+
+Backups capture all tables including agents, tasks, activities, audit logs, and system settings.
+
+## List Backups
+
+Retrieve a list of all available backup files sorted by creation time (newest first).
+
+<CodeGroup>
+```bash cURL
+curl -X GET https://your-domain.com/api/backup \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN"
+```
+
+```javascript JavaScript
+const response = await fetch('/api/backup', {
+  credentials: 'include'
+});
+const { backups, dir } = await response.json();
+```
+</CodeGroup>
+
+### Response
+
+<ResponseField name="backups" type="array">
+  Array of backup file metadata
+  
+  <ResponseField name="name" type="string" required>
+    Backup filename (e.g., `mc-backup-2026-03-04_03-00-00.db`)
+  </ResponseField>
+  
+  <ResponseField name="size" type="integer" required>
+    File size in bytes
+  </ResponseField>
+  
+  <ResponseField name="created_at" type="integer" required>
+    Unix timestamp of backup creation
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="dir" type="string">
+  Absolute path to the backup directory
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "backups": [
+    {
+      "name": "mc-backup-2026-03-04_03-00-00.db",
+      "size": 2097152,
+      "created_at": 1709524800
+    },
+    {
+      "name": "mc-backup-2026-03-03_03-00-00.db",
+      "size": 2048000,
+      "created_at": 1709438400
+    }
+  ],
+  "dir": "/var/lib/mission-control/backups"
+}
+```
+
+## Create Backup
+
+Manually trigger a database backup. This creates an immediate snapshot of the current database state.
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://your-domain.com/api/backup \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN"
+```
+
+```javascript JavaScript
+const response = await fetch('/api/backup', {
+  method: 'POST',
+  credentials: 'include'
+});
+const { success, backup } = await response.json();
+```
+</CodeGroup>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Whether the backup was created successfully
+</ResponseField>
+
+<ResponseField name="backup" type="object" required>
+  Metadata of the newly created backup
+  
+  <ResponseField name="name" type="string" required>
+    Backup filename
+  </ResponseField>
+  
+  <ResponseField name="size" type="integer" required>
+    File size in bytes
+  </ResponseField>
+  
+  <ResponseField name="created_at" type="integer" required>
+    Unix timestamp of creation
+  </ResponseField>
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "backup": {
+    "name": "mc-backup-2026-03-04_15-30-22.db",
+    "size": 2097152,
+    "created_at": 1709569822
+  }
+}
+```
+
+<Warning>
+Backup creation is rate-limited to prevent system overload. The default limit allows 10 backups per hour per admin user.
+</Warning>
+
+### Automatic Pruning
+
+After creating a backup, the system automatically prunes old backups to maintain the configured retention count:
+
+1. Lists all backup files in the backup directory
+2. Sorts by modification time (newest first)
+3. Deletes files beyond the retention limit (default: 10)
+4. Retention count is configured via `general.backup_retention_count` setting
+
+## Delete Backup
+
+Remove a specific backup file. Useful for managing disk space or removing outdated backups.
+
+<CodeGroup>
+```bash cURL
+curl -X DELETE https://your-domain.com/api/backup \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "mc-backup-2026-03-01_03-00-00.db"}'
+```
+
+```javascript JavaScript
+const response = await fetch('/api/backup', {
+  method: 'DELETE',
+  credentials: 'include',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ 
+    name: 'mc-backup-2026-03-01_03-00-00.db' 
+  })
+});
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Backup filename to delete. Must be a valid `.db` file without path traversal characters.
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Whether the backup was deleted successfully
+</ResponseField>
+
+### Security
+
+The API validates backup names to prevent path traversal attacks:
+- Must end with `.db`
+- Cannot contain `/` or `..`
+- Must exist in the backup directory
+
+Deletion is logged to the audit trail with the admin username and deleted filename.
+
+## Automated Backups
+
+For automated daily backups, use the Scheduler API:
+
+1. Enable auto-backup via Settings API:
+   ```bash
+   curl -X PUT https://your-domain.com/api/settings \
+     -H "Cookie: mc-session=YOUR_SESSION_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"settings": {"general.auto_backup": "true"}}'
+   ```
+
+2. Backups will run daily at 3:00 AM UTC
+
+3. Monitor backup status via Scheduler API:
+   ```bash
+   curl -X GET https://your-domain.com/api/scheduler \
+     -H "Cookie: mc-session=YOUR_SESSION_TOKEN"
+   ```
+
+4. Manually trigger a backup:
+   ```bash
+   curl -X POST https://your-domain.com/api/scheduler \
+     -H "Cookie: mc-session=YOUR_SESSION_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"task_id": "auto_backup"}'
+   ```
+
+See [Scheduler API](/api/scheduler) for more details on automated backup configuration.
+
+## Error Responses
+
+<ResponseField name="400 Bad Request">
+  Invalid backup name (missing, contains invalid characters, or wrong extension)
+</ResponseField>
+
+<ResponseField name="401 Unauthorized">
+  User is not authenticated. Check session cookie.
+</ResponseField>
+
+<ResponseField name="403 Forbidden">
+  User does not have admin role. Only admins can manage backups.
+</ResponseField>
+
+<ResponseField name="404 Not Found">
+  Backup file not found (DELETE only)
+</ResponseField>
+
+<ResponseField name="429 Too Many Requests">
+  Rate limit exceeded. Wait before creating another backup.
+</ResponseField>
+
+<ResponseField name="500 Internal Server Error">
+  Backup operation failed. Check server logs for details.
+</ResponseField>
+
+## Backup Best Practices
+
+1. **Enable Auto-Backup**: Turn on `general.auto_backup` for daily snapshots
+2. **Monitor Disk Space**: Adjust `general.backup_retention_count` based on available storage
+3. **Test Restores**: Periodically verify backup integrity by testing restoration
+4. **Off-Site Storage**: Copy backups to external storage for disaster recovery
+5. **Before Updates**: Always create a manual backup before system upgrades
+
+## Restoring from Backup
+
+To restore from a backup:
+
+1. Stop the Mission Control service
+2. Locate the backup file in the `backups/` directory
+3. Replace the main database file with the backup:
+   ```bash
+   cp backups/mc-backup-2026-03-04_03-00-00.db mission-control.db
+   ```
+4. Restart the service
+5. Verify data integrity via the UI or API

@@ -1,0 +1,362 @@
+---
+title: Agent Management
+description: Monitor and control your AI agent fleet with real-time status tracking, lifecycle management, and SOUL personality configuration
+icon: robot
+---
+
+## Overview
+
+The Agent Management panel is the command center for your AI agent fleet. Monitor agent health, view task assignments, update SOUL configurations, and manage the full agent lifecycle from registration to retirement.
+
+<Note>
+Mission Control supports both gateway-connected agents (via OpenClaw) and direct CLI connections for tools like Claude Code and Codex.
+</Note>
+
+## Accessing Agent Management
+
+<Steps>
+  <Step title="Navigate to Agent Squad">
+    Click the **Agents** tab in the left navigation rail to open the Agent Squad panel.
+  </Step>
+  <Step title="View Agent Grid">
+    All registered agents appear in a responsive grid showing status, task stats, and quick actions.
+  </Step>
+  <Step title="Select an Agent">
+    Click any agent card to open the detailed agent modal with full configuration options.
+  </Step>
+</Steps>
+
+## Agent Status States
+
+Each agent has one of four status states indicated by color-coded indicators:
+
+<Tabs>
+  <Tab title="Idle">
+    **🟢 Idle** — Agent is online and available for work. Last seen within the configured timeout window (default: 10 minutes).
+  </Tab>
+  <Tab title="Busy">
+    **🟡 Busy** — Agent is actively working on a task. Status updates automatically via heartbeat API.
+  </Tab>
+  <Tab title="Offline">
+    **⚫ Offline** — Agent hasn't sent a heartbeat recently. Automatically marked offline by the scheduler after timeout.
+  </Tab>
+  <Tab title="Error">
+    **🔴 Error** — Agent encountered a critical error. Check the Activity Feed or logs for details.
+  </Tab>
+</Tabs>
+
+## Agent Card Information
+
+Each agent card displays:
+
+- **Name & Role** — Agent identifier and assigned role (researcher, developer, analyst, etc.)
+- **Status Indicator** — Live status with pulsing animation for active states
+- **Session Key** — Current session identifier (if connected via gateway)
+- **Task Statistics**:
+  - Total tasks assigned
+  - Tasks currently in progress
+  - Completed tasks
+- **Last Seen** — Relative timestamp of last heartbeat (e.g., "5m ago", "2h ago")
+- **Last Activity** — Description of most recent action
+
+## Quick Actions
+
+Three buttons on each agent card allow instant status control:
+
+<CardGroup cols={3}>
+  <Card title="Wake" icon="sun">
+    Manually activate an offline or sleeping agent. Sets status to `idle` and logs the activation.
+  </Card>
+  <Card title="Busy" icon="circle-dot">
+    Mark agent as busy. Useful for manual task assignment workflows.
+  </Card>
+  <Card title="Sleep" icon="moon">
+    Set agent offline. Prevents automatic task assignment and stops heartbeat monitoring.
+  </Card>
+</CardGroup>
+
+## Agent Detail Modal
+
+Click any agent card to open the detailed view:
+
+### Status Control
+
+Manually transition between `idle`, `busy`, and `offline` states. Status changes are logged to the audit trail and activity feed.
+
+### Agent Configuration
+
+<Accordion title="Role">
+  The agent's role or specialization (e.g., "research", "code-review", "devops"). Used for task routing and filtering.
+</Accordion>
+
+<Accordion title="Session Key">
+  Unique identifier for the agent's connection. Auto-assigned by gateway or provided during registration.
+</Accordion>
+
+<Accordion title="SOUL Content">
+  The agent's personality, capabilities, and behavioral guidelines. See [SOUL Configuration](#soul-configuration) below.
+</Accordion>
+
+### Task Statistics
+
+View detailed task breakdown:
+- **Total** — All tasks ever assigned to this agent
+- **Assigned** — Tasks waiting to be picked up
+- **In Progress** — Currently active tasks
+- **Done** — Completed tasks
+
+### Timestamps
+
+- **Created** — When the agent was first registered
+- **Last Updated** — Most recent configuration change
+- **Last Seen** — Last successful heartbeat
+
+## SOUL Configuration
+
+The **SOUL System** defines an agent's personality, capabilities, and behavioral guidelines via markdown files.
+
+### What is SOUL?
+
+SOUL (Self-Organized Understanding Layer) is a markdown-based configuration that includes:
+
+- Agent personality traits
+- Capability declarations
+- Domain expertise
+- Communication style
+- Behavioral constraints
+- Custom instructions
+
+### Bidirectional Sync
+
+SOUL content syncs between:
+1. **Database** — Stored in the `agents` table
+2. **Workspace Files** — `soul.md` files in agent workspace directories
+
+Changes made in the UI update the database **and** write to disk. Changes made to `soul.md` files are detected and synced back to the database.
+
+### Editing SOUL Content
+
+<Steps>
+  <Step title="Open Agent Modal">
+    Click an agent card to open the detail view.
+  </Step>
+  <Step title="Click Edit">
+    Click the **Edit Agent** button in the modal footer.
+  </Step>
+  <Step title="Update SOUL Content">
+    Edit the SOUL Content textarea. Supports full markdown formatting.
+  </Step>
+  <Step title="Save Changes">
+    Click **Save Changes**. Updates sync to both database and workspace file.
+  </Step>
+</Steps>
+
+<Warning>
+SOUL files must be valid markdown. Syntax errors may cause parsing failures during sync.
+</Warning>
+
+## Registering New Agents
+
+Add agents via the UI or API:
+
+### Via UI
+
+<Steps>
+  <Step title="Click Add Agent">
+    Click the **+ Add Agent** button in the Agent Squad header.
+  </Step>
+  <Step title="Fill Form">
+    Provide:
+    - **Name** (required) — Unique identifier
+    - **Role** (required) — Agent specialization
+    - **Session Key** (optional) — Gateway session identifier
+    - **SOUL Content** (optional) — Initial personality configuration
+  </Step>
+  <Step title="Create">
+    Click **Create Agent**. The agent appears immediately in the grid.
+  </Step>
+</Steps>
+
+### Via API
+
+Register agents programmatically:
+
+```bash
+curl -X POST http://localhost:3000/api/agents \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "name": "researcher-01",
+    "role": "research",
+    "session_key": "clawd-session-abc123",
+    "soul_content": "# Researcher Agent\\n\\nExpert in data analysis and market research."
+  }'
+```
+
+### Auto-Registration
+
+Agents can auto-register via the `/api/connect` endpoint (Direct CLI Integration) or sync from `openclaw.json` via `/api/agents/sync`.
+
+## Heartbeat Monitoring
+
+Mission Control tracks agent liveness via heartbeats:
+
+### Heartbeat API
+
+Agents send periodic heartbeats:
+
+```bash
+curl -X POST http://localhost:3000/api/agents/{id}/heartbeat \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "status": "idle",
+    "last_activity": "Completed task #42",
+    "tokens": {
+      "model": "claude-sonnet-4-20250514",
+      "input": 1500,
+      "output": 800
+    }
+  }'
+```
+
+### Automatic Timeout
+
+The background scheduler checks for stale agents every 5 minutes:
+
+1. Agents with no heartbeat for 10+ minutes (configurable) are marked **offline**
+2. A notification is created for the operator
+3. Activity is logged to the audit trail
+
+<Accordion title="Configure Heartbeat Timeout">
+  Adjust the timeout in Settings → General:
+  
+  ```json
+  {
+    "general.agent_timeout_minutes": 10
+  }
+  ```
+</Accordion>
+
+## Wake API
+
+Manually wake sleeping agents:
+
+```bash
+curl -X POST http://localhost:3000/api/agents/{id}/wake \
+  -H "x-api-key: your-api-key"
+```
+
+Sets status to `idle` and logs the wake event.
+
+## Inter-Agent Communication
+
+Agents can send messages to each other via the Comms API:
+
+```bash
+# Send a message
+curl -X POST http://localhost:3000/api/agents/message \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "from": "researcher-01",
+    "to": "analyst-02",
+    "message": "Found 3 relevant papers on quantum computing."
+  }'
+```
+
+```bash
+# Retrieve messages
+curl http://localhost:3000/api/agents/comms?agent=analyst-02 \
+  -H "x-api-key: your-api-key"
+```
+
+Messages appear in the Agent Comms panel and trigger notifications.
+
+## Auto-Refresh & Live Updates
+
+The Agent Squad panel features:
+
+- **Auto-refresh toggle** — Enable/disable 10-second polling
+- **Live indicator** — Green pulsing dot when auto-refresh is active
+- **Manual refresh** — Click **Refresh** to update immediately
+- **SSE integration** — Real-time updates when connected to gateway
+
+<Note>
+When Server-Sent Events (SSE) is active, polling pauses automatically to reduce server load. The panel receives live updates via the event stream instead.
+</Note>
+
+## Status Summary
+
+The panel header shows a live count of agents by status:
+
+- 🟢 **Idle** — Available agents
+- 🟡 **Busy** — Working agents
+- ⚫ **Offline** — Inactive agents
+- 🔴 **Error** — Agents requiring attention
+
+## Common Workflows
+
+### Onboard a New Agent
+
+<Steps>
+  <Step title="Register">
+    Create the agent via UI or API.
+  </Step>
+  <Step title="Configure SOUL">
+    Edit SOUL content to define personality and capabilities.
+  </Step>
+  <Step title="Test Connection">
+    Send a heartbeat or wake the agent.
+  </Step>
+  <Step title="Assign Tasks">
+    Go to Task Board and assign work to the new agent.
+  </Step>
+</Steps>
+
+### Troubleshoot an Offline Agent
+
+<Steps>
+  <Step title="Check Last Seen">
+    View the agent card to see when the last heartbeat was received.
+  </Step>
+  <Step title="Review Activity Feed">
+    Open Activity Feed to see status change events.
+  </Step>
+  <Step title="Check Logs">
+    If gateway-connected, check the Log Viewer for error messages.
+  </Step>
+  <Step title="Wake Agent">
+    Click **Wake** to manually reactivate.
+  </Step>
+</Steps>
+
+### Bulk Agent Operations
+
+<Accordion title="Sync from Gateway Config">
+  ```bash
+  curl -X POST http://localhost:3000/api/agents/sync \
+    -H "x-api-key: your-api-key"
+  ```
+  
+  Reads `openclaw.json` and registers/updates all configured agents.
+</Accordion>
+
+<Accordion title="Export Agent Data">
+  ```bash
+  curl http://localhost:3000/api/export?type=agents&format=csv \
+    -H "x-api-key: your-api-key" \
+    -o agents.csv
+  ```
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Task Board" icon="table-columns" href="/features/task-board">
+    Assign tasks to agents using the Kanban board
+  </Card>
+  <Card title="Real-Time Monitoring" icon="chart-line" href="/features/real-time-monitoring">
+    Monitor agent activity with live feeds and logs
+  </Card>
+</CardGroup>

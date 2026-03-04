@@ -1,0 +1,549 @@
+---
+title: Webhooks
+description: Configure outbound webhooks to receive real-time event notifications from Mission Control
+---
+
+# Webhooks
+
+Webhooks allow you to receive real-time HTTP POST notifications when events occur in Mission Control. Configure webhook endpoints to integrate with external services, trigger automation, or monitor system activity.
+
+## Features
+
+- **Event filtering**: Subscribe to specific event types or all events (`*`)
+- **HMAC signature verification**: Cryptographically signed payloads using SHA-256
+- **Automatic retries**: Exponential backoff with jitter (30s, 5m, 30m, 2h, 8h)
+- **Circuit breaker**: Auto-disable after 5 consecutive failures
+- **Delivery history**: Track all webhook attempts with status codes and response bodies
+
+---
+
+## List Webhooks
+
+<CodeGroup>
+```bash cURL
+curl http://localhost:3000/api/webhooks \
+  -H "x-api-key: YOUR_API_KEY"
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:3000/api/webhooks', {
+  headers: { 'x-api-key': 'YOUR_API_KEY' }
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+### Response
+
+<ResponseField name="webhooks" type="array">
+  Array of webhook configurations with delivery statistics
+
+  <ResponseField name="id" type="integer">
+    Webhook ID
+  </ResponseField>
+
+  <ResponseField name="name" type="string">
+    Webhook name
+  </ResponseField>
+
+  <ResponseField name="url" type="string">
+    Target URL for webhook deliveries
+  </ResponseField>
+
+  <ResponseField name="secret" type="string">
+    Masked secret (shows only last 4 characters: `••••••abc1`)
+  </ResponseField>
+
+  <ResponseField name="events" type="array">
+    Array of subscribed event types (e.g., `["agent.status_change", "activity.task_created"]` or `["*"]` for all)
+  </ResponseField>
+
+  <ResponseField name="enabled" type="boolean">
+    Whether webhook is active
+  </ResponseField>
+
+  <ResponseField name="consecutive_failures" type="integer">
+    Number of consecutive delivery failures
+  </ResponseField>
+
+  <ResponseField name="circuit_open" type="boolean">
+    `true` if circuit breaker is tripped (≥5 failures)
+  </ResponseField>
+
+  <ResponseField name="total_deliveries" type="integer">
+    Total delivery attempts
+  </ResponseField>
+
+  <ResponseField name="successful_deliveries" type="integer">
+    Deliveries with 2xx status code
+  </ResponseField>
+
+  <ResponseField name="failed_deliveries" type="integer">
+    Deliveries with errors or non-2xx status
+  </ResponseField>
+</ResponseField>
+
+---
+
+## Create Webhook
+
+<CodeGroup>
+```bash cURL
+curl -X POST http://localhost:3000/api/webhooks \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{
+    "name": "Slack Notifications",
+    "url": "https://hooks.slack.com/services/T00/B00/XXX",
+    "events": ["agent.error", "activity.task_created"],
+    "generate_secret": true
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:3000/api/webhooks', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'x-api-key': 'YOUR_API_KEY'
+  },
+  body: JSON.stringify({
+    name: 'Slack Notifications',
+    url: 'https://hooks.slack.com/services/T00/B00/XXX',
+    events: ['agent.error', 'activity.task_created'],
+    generate_secret: true
+  })
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Webhook name for identification
+</ParamField>
+
+<ParamField body="url" type="string" required>
+  Target URL (must be valid HTTP/HTTPS endpoint)
+</ParamField>
+
+<ParamField body="events" type="array">
+  Event types to subscribe to. Use `["*"]` for all events. Defaults to `["*"]`
+</ParamField>
+
+<ParamField body="generate_secret" type="boolean" default={true}>
+  Generate HMAC secret for signature verification
+</ParamField>
+
+### Response
+
+<Warning>
+The `secret` field is only shown in full **once** during creation. Save it securely.
+</Warning>
+
+<ResponseField name="id" type="integer">
+  Created webhook ID
+</ResponseField>
+
+<ResponseField name="secret" type="string">
+  HMAC secret (64-character hex string). Only shown on creation.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Confirmation message
+</ResponseField>
+
+---
+
+## Update Webhook
+
+<CodeGroup>
+```bash cURL
+curl -X PUT http://localhost:3000/api/webhooks \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{
+    "id": 1,
+    "name": "Updated Name",
+    "events": ["*"],
+    "enabled": true,
+    "reset_circuit": true
+  }'
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="id" type="integer" required>
+  Webhook ID to update
+</ParamField>
+
+<ParamField body="name" type="string">
+  New webhook name
+</ParamField>
+
+<ParamField body="url" type="string">
+  New target URL
+</ParamField>
+
+<ParamField body="events" type="array">
+  Updated event subscriptions
+</ParamField>
+
+<ParamField body="enabled" type="boolean">
+  Enable or disable webhook
+</ParamField>
+
+<ParamField body="regenerate_secret" type="boolean">
+  Generate a new HMAC secret (returns new secret in response)
+</ParamField>
+
+<ParamField body="reset_circuit" type="boolean">
+  Reset circuit breaker (clears failures and re-enables webhook)
+</ParamField>
+
+---
+
+## Delete Webhook
+
+<CodeGroup>
+```bash cURL
+curl -X DELETE http://localhost:3000/api/webhooks \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{"id": 1}'
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="id" type="integer" required>
+  Webhook ID to delete
+</ParamField>
+
+---
+
+## Get Delivery History
+
+Retrieve webhook delivery logs with status codes, error messages, and response bodies.
+
+<CodeGroup>
+```bash cURL
+curl "http://localhost:3000/api/webhooks/deliveries?webhook_id=1&limit=50" \
+  -H "x-api-key: YOUR_API_KEY"
+```
+</CodeGroup>
+
+### Query Parameters
+
+<ParamField query="webhook_id" type="integer">
+  Filter deliveries for a specific webhook
+</ParamField>
+
+<ParamField query="limit" type="integer" default={50}>
+  Maximum deliveries to return (max 200)
+</ParamField>
+
+<ParamField query="offset" type="integer" default={0}>
+  Pagination offset
+</ParamField>
+
+### Response
+
+<ResponseField name="deliveries" type="array">
+  <ResponseField name="id" type="integer">
+    Delivery ID
+  </ResponseField>
+
+  <ResponseField name="webhook_id" type="integer">
+    Parent webhook ID
+  </ResponseField>
+
+  <ResponseField name="event_type" type="string">
+    Event type (e.g., `agent.status_change`, `test.ping`)
+  </ResponseField>
+
+  <ResponseField name="status_code" type="integer">
+    HTTP status code (e.g., `200`, `500`, `null` if timeout)
+  </ResponseField>
+
+  <ResponseField name="error" type="string">
+    Error message if delivery failed
+  </ResponseField>
+
+  <ResponseField name="duration_ms" type="number">
+    Request duration in milliseconds
+  </ResponseField>
+
+  <ResponseField name="attempt" type="integer">
+    Retry attempt number (0 = first attempt)
+  </ResponseField>
+
+  <ResponseField name="is_retry" type="boolean">
+    Whether this is a retry of a previous failed delivery
+  </ResponseField>
+
+  <ResponseField name="created_at" type="integer">
+    Unix timestamp
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="total" type="integer">
+  Total delivery count
+</ResponseField>
+
+---
+
+## Retry Failed Delivery
+
+Manually retry a failed webhook delivery.
+
+<CodeGroup>
+```bash cURL
+curl -X POST http://localhost:3000/api/webhooks/retry \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{"delivery_id": 123}'
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="delivery_id" type="integer" required>
+  ID of the failed delivery to retry
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Whether the retry succeeded
+</ResponseField>
+
+<ResponseField name="status_code" type="integer">
+  HTTP status code from retry attempt
+</ResponseField>
+
+<ResponseField name="response_time_ms" type="number">
+  Request duration
+</ResponseField>
+
+---
+
+## Test Webhook
+
+Send a test ping to verify webhook configuration.
+
+<CodeGroup>
+```bash cURL
+curl -X POST http://localhost:3000/api/webhooks/test \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{"id": 1}'
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="id" type="integer" required>
+  Webhook ID to test
+</ParamField>
+
+### Test Payload Example
+
+```json
+{
+  "event": "test.ping",
+  "timestamp": 1678901234,
+  "data": {
+    "message": "This is a test webhook from Mission Control",
+    "webhook_id": 1,
+    "webhook_name": "My Webhook",
+    "triggered_by": "admin"
+  }
+}
+```
+
+---
+
+## Signature Verification
+
+<Note>
+All webhook payloads include an `X-MC-Signature` header containing an HMAC-SHA256 signature. Always verify this signature before processing webhooks.
+</Note>
+
+### Verification Algorithm
+
+1. Extract the raw request body as a UTF-8 string (do **not** parse JSON first)
+2. Read the `X-MC-Signature` header
+3. Compute HMAC-SHA256 of the raw body using your webhook secret
+4. Format as: `sha256=<hex-digest>`
+5. Compare using constant-time comparison
+
+### Node.js Example
+
+```javascript
+const crypto = require('crypto');
+
+function verifySignature(secret, rawBody, signatureHeader) {
+  const expected = 'sha256=' + crypto
+    .createHmac('sha256', secret)
+    .update(rawBody)
+    .digest('hex');
+  
+  const sigBuf = Buffer.from(signatureHeader);
+  const expBuf = Buffer.from(expected);
+  
+  if (sigBuf.length !== expBuf.length) return false;
+  return crypto.timingSafeEqual(sigBuf, expBuf);
+}
+
+// Express middleware example
+app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  const signature = req.headers['x-mc-signature'];
+  const rawBody = req.body.toString('utf8');
+  
+  if (!verifySignature(MY_SECRET, rawBody, signature)) {
+    return res.status(401).send('Invalid signature');
+  }
+  
+  const payload = JSON.parse(rawBody);
+  // Process webhook...
+  res.sendStatus(200);
+});
+```
+
+### Python Example
+
+```python
+import hmac
+import hashlib
+
+def verify_signature(secret: str, raw_body: bytes, signature_header: str) -> bool:
+    expected = 'sha256=' + hmac.new(
+        secret.encode('utf-8'),
+        raw_body,
+        hashlib.sha256
+    ).hexdigest()
+    
+    return hmac.compare_digest(expected, signature_header)
+
+# Flask example
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    signature = request.headers.get('X-MC-Signature')
+    raw_body = request.get_data()
+    
+    if not verify_signature(MY_SECRET, raw_body, signature):
+        return 'Invalid signature', 401
+    
+    payload = request.get_json()
+    # Process webhook...
+    return '', 200
+```
+
+---
+
+## Retry Logic
+
+Mission Control automatically retries failed webhook deliveries using exponential backoff:
+
+| Attempt | Delay       | Total Time |
+|---------|-------------|------------|
+| 1       | immediate   | 0s         |
+| 2       | 30s ±20%    | ~30s       |
+| 3       | 5m ±20%     | ~5m        |
+| 4       | 30m ±20%    | ~35m       |
+| 5       | 2h ±20%     | ~2.5h      |
+| 6       | 8h ±20%     | ~10.5h     |
+
+<Note>
+Jitter (±20%) prevents thundering herd when multiple webhooks fail simultaneously.
+</Note>
+
+### Circuit Breaker
+
+After **5 consecutive failures** (across all retries), the webhook is automatically disabled. To re-enable:
+
+1. Fix the endpoint issue
+2. Call `PUT /api/webhooks` with `reset_circuit: true`
+
+---
+
+## Event Types
+
+Subscribe to specific event types or use `*` for all events:
+
+### Agent Events
+- `agent.status_change` - Agent status changed (online, offline, busy, error)
+- `agent.error` - Agent entered error state
+
+### Task Events
+- `activity.task_created` - New task created
+- `activity.task_updated` - Task fields modified
+- `activity.task_deleted` - Task deleted
+- `activity.task_status_changed` - Task status changed
+
+### Activity Events
+- `activity.<type>` - Generic activity (e.g., `activity.agent_created`, `activity.user_login`)
+
+### Notification Events
+- `notification.<type>` - System notifications
+
+### Security Events
+- `security.<action>` - Security-related events (e.g., `security.login_failed`)
+
+### Test Events
+- `test.ping` - Test webhook delivery
+
+---
+
+## Payload Format
+
+All webhook deliveries use this structure:
+
+```json
+{
+  "event": "agent.status_change",
+  "timestamp": 1678901234,
+  "data": {
+    "id": 42,
+    "name": "researcher",
+    "status": "online",
+    "previous_status": "offline"
+  }
+}
+```
+
+### Headers
+
+```
+Content-Type: application/json
+User-Agent: MissionControl-Webhook/1.0
+X-MC-Event: agent.status_change
+X-MC-Signature: sha256=abc123...
+```
+
+---
+
+## Best Practices
+
+1. **Always verify signatures** - Prevent spoofed webhooks
+2. **Respond quickly** - Return 200 OK within 10 seconds (timeout)
+3. **Process async** - Queue webhooks for background processing
+4. **Idempotency** - Handle duplicate deliveries gracefully (retries)
+5. **Monitor failures** - Alert on circuit breaker trips
+6. **Rotate secrets** - Use `regenerate_secret` periodically
+
+---
+
+## Rate Limits
+
+- **Creation/updates**: 100 requests/minute per API key
+- **Delivery timeout**: 10 seconds per webhook
+- **Max retries**: 5 attempts with exponential backoff
+- **History retention**: Last 200 deliveries per webhook
+
+<Note>
+The automatic retry scheduler runs every 60 seconds and processes up to 50 pending retries per batch.
+</Note>

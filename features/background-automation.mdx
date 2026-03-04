@@ -1,0 +1,544 @@
+---
+title: Background Automation
+description: Scheduled tasks for backups, cleanup, heartbeat monitoring, and webhook retries
+icon: clock
+---
+
+## Overview
+
+Mission Control's scheduler runs automated maintenance tasks in the background without manual intervention. Handle database backups, stale data cleanup, agent heartbeat checks, webhook retries, and Claude Code session scanning.
+
+<Note>
+The scheduler initializes automatically on startup and runs tasks based on configured intervals. No user action required.
+</Note>
+
+## Accessing Scheduler Status
+
+<Steps>
+  <Step title="Navigate to Settings">
+    Click **Settings** in the left navigation rail.
+  </Step>
+  <Step title="Open Background Tasks">
+    Scroll to the **Background Tasks** section.
+  </Step>
+  <Step title="View Task Status">
+    See last run time, next scheduled run, and enabled/disabled status for each task.
+  </Step>
+</Steps>
+
+### Via API
+
+Query scheduler status programmatically:
+
+```bash
+curl http://localhost:3000/api/scheduler \
+  -H "x-api-key: your-api-key"
+```
+
+**Response:**
+```json
+[
+  {
+    "id": "auto_backup",
+    "name": "Auto Backup",
+    "enabled": true,
+    "lastRun": 1735696800000,
+    "nextRun": 1735783200000,
+    "running": false,
+    "lastResult": {
+      "ok": true,
+      "message": "Backup created (2456KB)",
+      "timestamp": 1735696800000
+    }
+  }
+]
+```
+
+## Scheduled Tasks
+
+Five background tasks run automatically:
+
+### 1. Auto Backup
+
+**Purpose:** Create database backups to prevent data loss.
+
+**Schedule:** Daily at ~3 AM UTC (relative to process start time)
+
+**What It Does:**
+
+<Steps>
+  <Step title="Create Backup">
+    Copies SQLite database to `.data/backups/mc-backup-{timestamp}.db`
+  </Step>
+  <Step title="Log Event">
+    Records backup creation in audit log with file size
+  </Step>
+  <Step title="Prune Old Backups">
+    Deletes backups older than retention count (default: keep 10)
+  </Step>
+</Steps>
+
+**Configuration:**
+
+```json
+{
+  "general.auto_backup": true,
+  "general.backup_retention_count": 10
+}
+```
+
+**Manual Trigger:**
+
+```bash
+curl -X POST http://localhost:3000/api/scheduler \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{"action": "trigger", "taskId": "auto_backup"}'
+```
+
+or use the dedicated backup endpoint:
+
+```bash
+curl -X POST http://localhost:3000/api/backup \
+  -H "x-api-key: your-api-key"
+```
+
+<Accordion title="Backup File Format">
+  Filenames follow the pattern: `mc-backup-YYYY-MM-DD_HH-MM-SS.db`
+  
+  Example: `mc-backup-2026-03-04_03-00-00.db`
+</Accordion>
+
+### 2. Auto Cleanup
+
+**Purpose:** Remove stale records based on retention policies.
+
+**Schedule:** Daily at ~4 AM UTC
+
+**What It Does:**
+
+<Steps>
+  <Step title="Delete Old Activities">
+    Remove activity feed entries older than configured days
+  </Step>
+  <Step title="Delete Old Audit Logs">
+    Remove audit trail entries older than configured days
+  </Step>
+  <Step title="Delete Old Notifications">
+    Remove notifications older than configured days
+  </Step>
+  <Step title="Delete Old Pipeline Runs">
+    Remove pipeline execution history older than configured days
+  </Step>
+  <Step title="Clean Token Usage File">
+    Remove token records from `tokens.json` older than configured days
+  </Step>
+  <Step title="Log Summary">
+    Record total number of deleted records in audit log
+  </Step>
+</Steps>
+
+**Configuration:**
+
+```json
+{
+  "general.auto_cleanup": true,
+  "retention.activities": 90,
+  "retention.auditLog": 180,
+  "retention.notifications": 30,
+  "retention.pipelineRuns": 60,
+  "retention.tokenUsage": 90
+}
+```
+
+<Note>
+Set retention to `0` to disable cleanup for a specific record type. Records will be kept indefinitely.
+</Note>
+
+**Manual Trigger:**
+
+```bash
+curl -X POST http://localhost:3000/api/cleanup \
+  -H "x-api-key: your-api-key"
+```
+
+### 3. Agent Heartbeat Check
+
+**Purpose:** Mark agents offline if they haven't sent a heartbeat recently.
+
+**Schedule:** Every 5 minutes
+
+**What It Does:**
+
+<Steps>
+  <Step title="Query Stale Agents">
+    Find agents with `status != 'offline'` and `last_seen < threshold`
+  </Step>
+  <Step title="Mark Offline">
+    Update agent status to `offline` and set `updated_at` timestamp
+  </Step>
+  <Step title="Log Activity">
+    Create activity feed entry: "Agent marked offline (no heartbeat for Xm)"
+  </Step>
+  <Step title="Create Notification">
+    Notify operator: "Agent offline: {name}"
+  </Step>
+  <Step title="Audit Log">
+    Record which agents were marked offline
+  </Step>
+</Steps>
+
+**Configuration:**
+
+```json
+{
+  "general.agent_heartbeat": true,
+  "general.agent_timeout_minutes": 10
+}
+```
+
+<Warning>
+If agents are frequently marked offline, increase `agent_timeout_minutes` or ensure agents are sending heartbeats regularly.
+</Warning>
+
+**Manual Trigger:**
+
+```bash
+curl -X POST http://localhost:3000/api/scheduler \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{"action": "trigger", "taskId": "agent_heartbeat"}'
+```
+
+### 4. Webhook Retry
+
+**Purpose:** Retry failed webhook deliveries with exponential backoff.
+
+**Schedule:** Every 60 seconds
+
+**What It Does:**
+
+<Steps>
+  <Step title="Query Failed Deliveries">
+    Find webhook deliveries with `status = 'failed'` and `next_retry <= now`
+  </Step>
+  <Step title="Check Circuit Breaker">
+    Skip webhooks that have exceeded max retries (circuit open)
+  </Step>
+  <Step title="Retry Delivery">
+    Send HTTP request to webhook URL with payload
+  </Step>
+  <Step title="Update Status">
+    Mark as `success` or increment retry count
+  </Step>
+  <Step title="Calculate Backoff">
+    Set `next_retry` using exponential backoff (1s, 2s, 4s, 8s, 16s, ...)
+  </Step>
+</Steps>
+
+**Configuration:**
+
+```json
+{
+  "webhooks.retry_enabled": true,
+  "webhooks.max_retries": 5,
+  "webhooks.retry_backoff": 2.0
+}
+```
+
+**Manual Trigger:**
+
+```bash
+curl -X POST http://localhost:3000/api/webhooks/retry/{deliveryId} \
+  -H "x-api-key: your-api-key"
+```
+
+<Accordion title="Circuit Breaker Behavior">
+  After 5 consecutive failures, the webhook enters "circuit open" state:
+  
+  - No further retry attempts
+  - Delivery status set to `circuit_open`
+  - Operator notification created
+  - Manual intervention required to reset
+</Accordion>
+
+### 5. Claude Session Scan
+
+**Purpose:** Auto-discover and track local Claude Code sessions.
+
+**Schedule:** Every 60 seconds
+
+**What It Does:**
+
+<Steps>
+  <Step title="Scan Projects Directory">
+    Read `~/.claude/projects/` for active projects
+  </Step>
+  <Step title="Parse JSONL Transcripts">
+    Extract conversation history from transcript files
+  </Step>
+  <Step title="Extract Token Usage">
+    Parse API responses for token counts (input, output, total)
+  </Step>
+  <Step title="Calculate Cost">
+    Multiply tokens by Claude model pricing
+  </Step>
+  <Step title="Store in Database">
+    Upsert session records with `source = 'claude-code'`
+  </Step>
+</Steps>
+
+**Configuration:**
+
+```json
+{
+  "general.claude_session_scan": true
+}
+```
+
+**Environment:**
+
+```bash
+MC_CLAUDE_HOME=~/.claude
+```
+
+**Manual Trigger:**
+
+```bash
+curl -X POST http://localhost:3000/api/claude/sessions \
+  -H "x-api-key: your-api-key"
+```
+
+<Note>
+Claude Code must be installed and have at least one project for scanning to work. Sessions are marked active if updated within the last hour.
+</Note>
+
+## Task Configuration
+
+Enable/disable tasks via Settings API:
+
+### Enable a Task
+
+```bash
+curl -X PUT http://localhost:3000/api/settings \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "general.auto_backup": true
+  }'
+```
+
+### Disable a Task
+
+```bash
+curl -X PUT http://localhost:3000/api/settings \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "general.auto_cleanup": false
+  }'
+```
+
+### View All Settings
+
+```bash
+curl http://localhost:3000/api/settings \
+  -H "x-api-key: your-api-key"
+```
+
+## Retention Policies
+
+Configure how long records are kept:
+
+<Tabs>
+  <Tab title="Activities">
+    **Key:** `retention.activities`
+    
+    **Default:** 90 days
+    
+    Activity feed entries (task updates, agent changes, etc.)
+  </Tab>
+  <Tab title="Audit Log">
+    **Key:** `retention.auditLog`
+    
+    **Default:** 180 days
+    
+    Audit trail entries (logins, config changes, etc.)
+  </Tab>
+  <Tab title="Notifications">
+    **Key:** `retention.notifications`
+    
+    **Default:** 30 days
+    
+    System and agent notifications
+  </Tab>
+  <Tab title="Pipeline Runs">
+    **Key:** `retention.pipelineRuns`
+    
+    **Default:** 60 days
+    
+    Pipeline execution history and logs
+  </Tab>
+  <Tab title="Token Usage">
+    **Key:** `retention.tokenUsage`
+    
+    **Default:** 90 days
+    
+    Token consumption records in `tokens.json`
+  </Tab>
+</Tabs>
+
+### Set Retention Policy
+
+```bash
+curl -X PUT http://localhost:3000/api/settings \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "retention.activities": 60,
+    "retention.auditLog": 365,
+    "retention.notifications": 14
+  }'
+```
+
+<Warning>
+Retention policies apply during the next cleanup run. Previously deleted data cannot be recovered.
+</Warning>
+
+## Scheduler Initialization
+
+The scheduler starts automatically when Mission Control launches:
+
+1. **Agent Sync** — Sync agents from `openclaw.json` on startup
+2. **Task Registration** — Register all 5 background tasks
+3. **Staggered Start** — Backup scheduled for ~3 AM, cleanup for ~4 AM (relative to start time)
+4. **Tick Loop** — Check every 60 seconds for due tasks
+
+### Startup Log
+
+```
+Scheduler initialized - backup at ~3AM, cleanup at ~4AM, 
+heartbeat every 5m, webhook retry every 60s, claude scan every 60s
+```
+
+## Monitoring Task Execution
+
+### Last Run Information
+
+Each task tracks:
+
+- **lastRun** — Timestamp of most recent execution
+- **nextRun** — Timestamp of next scheduled execution
+- **running** — Boolean indicating if task is currently executing
+- **lastResult** — Result of most recent execution:
+  - `ok` — Success/failure boolean
+  - `message` — Human-readable summary
+  - `timestamp` — When result was recorded
+
+### Example Result Messages
+
+- **Auto Backup:** `"Backup created (2456KB)"`
+- **Auto Cleanup:** `"Cleaned 147 stale records"`
+- **Heartbeat Check:** `"All agents healthy"` or `"Marked 2 agent(s) offline: researcher-01, analyst-02"`
+- **Webhook Retry:** `"Retried 3 deliveries: 2 succeeded, 1 failed"`
+- **Claude Scan:** `"Synced 2 sessions: mission-control, demo-project"`
+
+## Audit Trail
+
+All scheduled task executions are logged to the audit trail:
+
+```bash
+curl http://localhost:3000/api/audit?action=auto_backup \
+  -H "x-api-key: your-api-key"
+```
+
+**Response:**
+```json
+[
+  {
+    "id": 123,
+    "action": "auto_backup",
+    "actor": "scheduler",
+    "detail": {
+      "path": ".data/backups/mc-backup-2026-03-04_03-00-00.db",
+      "size": 2514944
+    },
+    "created_at": 1735696800
+  }
+]
+```
+
+## Troubleshooting
+
+<Accordion title="Task Not Running">
+  1. Check if task is enabled in settings
+  2. Verify `nextRun` timestamp is in the past
+  3. Confirm scheduler initialized (check startup logs)
+  4. Look for errors in `lastResult.message`
+</Accordion>
+
+<Accordion title="Backup Failing">
+  1. Verify `.data/backups/` directory exists and is writable
+  2. Check disk space: `df -h .data/`
+  3. Review permissions: `ls -la .data/backups/`
+  4. Check audit log for detailed error message
+</Accordion>
+
+<Accordion title="Cleanup Not Deleting Records">
+  1. Confirm retention policies are set (not 0)
+  2. Verify records are older than retention days
+  3. Check if task is enabled: `general.auto_cleanup = true`
+  4. Manually trigger cleanup and review result
+</Accordion>
+
+<Accordion title="Agents Marked Offline Too Quickly">
+  Increase timeout:
+  
+  ```bash
+  curl -X PUT http://localhost:3000/api/settings \
+    -H "Content-Type: application/json" \
+    -d '{"general.agent_timeout_minutes": 20}'
+  ```
+</Accordion>
+
+## Best Practices
+
+### Backup Strategy
+
+<Steps>
+  <Step title="Enable Auto Backup">
+    Always keep `general.auto_backup = true` in production.
+  </Step>
+  <Step title="Set Retention Count">
+    Keep 10-30 backups depending on disk space and change frequency.
+  </Step>
+  <Step title="External Backup">
+    Copy `.data/backups/` to offsite storage weekly (e.g., S3, Google Drive).
+  </Step>
+  <Step title="Test Restoration">
+    Periodically verify backups can be restored by copying to a test environment.
+  </Step>
+</Steps>
+
+### Retention Tuning
+
+- **High-traffic systems** — Reduce retention to 30-60 days to save disk space
+- **Audit compliance** — Increase audit log retention to 365+ days
+- **Development** — Use shorter retention (7-14 days) to keep database small
+
+### Heartbeat Tuning
+
+- **Reliable networks** — 10-minute timeout is fine
+- **Unreliable networks** — Increase to 20-30 minutes to avoid false positives
+- **Local development** — Consider disabling heartbeat checks entirely
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Agent Management" icon="robot" href="/features/agent-management">
+    Configure agent heartbeat intervals and SOUL files
+  </Card>
+  <Card title="Real-Time Monitoring" icon="chart-line" href="/features/real-time-monitoring">
+    Monitor task execution in the activity feed
+  </Card>
+</CardGroup>

@@ -1,0 +1,380 @@
+---
+title: 'Audit Log API'
+description: 'Query system audit trail and security events'
+icon: 'scroll'
+---
+
+<Warning>
+All audit log endpoints require **admin** role. Unauthorized users will receive a 403 Forbidden response.
+</Warning>
+
+## Overview
+
+The Audit Log API provides access to Mission Control's comprehensive security and activity audit trail. All administrative actions, configuration changes, and system events are automatically logged with actor information, timestamps, and contextual details.
+
+Audit events are retained based on the `retention.audit_log_days` setting (default: 180 days).
+
+## Query Audit Log
+
+Search and filter audit events with flexible query parameters.
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://your-domain.com/api/audit?action=settings_update&limit=100" \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN"
+```
+
+```javascript JavaScript
+const response = await fetch('/api/audit?action=backup_create&limit=50', {
+  credentials: 'include'
+});
+const { events, total } = await response.json();
+```
+</CodeGroup>
+
+### Query Parameters
+
+<ParamField query="action" type="string">
+  Filter by action type (e.g., `settings_update`, `backup_create`, `user_created`)
+</ParamField>
+
+<ParamField query="actor" type="string">
+  Filter by actor username (e.g., `admin`, `scheduler`)
+</ParamField>
+
+<ParamField query="limit" type="integer" default="1000">
+  Maximum number of events to return (max: 10000)
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of events to skip for pagination
+</ParamField>
+
+<ParamField query="since" type="integer">
+  Unix timestamp - only return events created after this time
+</ParamField>
+
+<ParamField query="until" type="integer">
+  Unix timestamp - only return events created before this time
+</ParamField>
+
+### Response
+
+<ResponseField name="events" type="array" required>
+  Array of audit event objects sorted by creation time (newest first)
+  
+  <ResponseField name="id" type="integer" required>
+    Unique event identifier
+  </ResponseField>
+  
+  <ResponseField name="action" type="string" required>
+    Action type (see Event Types section)
+  </ResponseField>
+  
+  <ResponseField name="actor" type="string" required>
+    Username of the user or system process that performed the action
+  </ResponseField>
+  
+  <ResponseField name="actor_id" type="integer">
+    User ID of the actor (null for system actors)
+  </ResponseField>
+  
+  <ResponseField name="detail" type="object">
+    Action-specific contextual data (parsed from JSON)
+  </ResponseField>
+  
+  <ResponseField name="ip_address" type="string">
+    IP address of the actor (for user actions)
+  </ResponseField>
+  
+  <ResponseField name="created_at" type="integer" required>
+    Unix timestamp of event creation
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="total" type="integer" required>
+  Total count of events matching the query (before pagination)
+</ResponseField>
+
+<ResponseField name="limit" type="integer" required>
+  Limit value used in the query
+</ResponseField>
+
+<ResponseField name="offset" type="integer" required>
+  Offset value used in the query
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "events": [
+    {
+      "id": 1523,
+      "action": "settings_update",
+      "actor": "admin",
+      "actor_id": 1,
+      "detail": {
+        "updated_keys": ["retention.activities_days", "general.auto_backup"],
+        "changes": {
+          "retention.activities_days": { "old": "90", "new": "60" },
+          "general.auto_backup": { "old": "false", "new": "true" }
+        }
+      },
+      "ip_address": "192.168.1.100",
+      "created_at": 1709524800
+    },
+    {
+      "id": 1522,
+      "action": "auto_backup",
+      "actor": "scheduler",
+      "actor_id": null,
+      "detail": {
+        "path": "/var/lib/mission-control/backups/mc-backup-2026-03-04_03-00-00.db",
+        "size": 2097152
+      },
+      "ip_address": null,
+      "created_at": 1709524800
+    },
+    {
+      "id": 1521,
+      "action": "user_created",
+      "actor": "admin",
+      "actor_id": 1,
+      "detail": {
+        "username": "operator_jane",
+        "role": "operator"
+      },
+      "ip_address": "192.168.1.100",
+      "created_at": 1709520000
+    }
+  ],
+  "total": 1523,
+  "limit": 100,
+  "offset": 0
+}
+```
+
+## Event Types
+
+Audit events are categorized by action type. Each type has specific detail fields.
+
+### Authentication & User Management
+
+<ResponseField name="login">
+  User login event
+  - **actor**: Username
+  - **detail**: Object with success boolean
+</ResponseField>
+
+<ResponseField name="logout">
+  User logout event
+  - **actor**: Username
+</ResponseField>
+
+<ResponseField name="user_created">
+  New user account created
+  - **actor**: Admin username
+  - **detail**: { username, role }
+</ResponseField>
+
+<ResponseField name="user_updated">
+  User account modified
+  - **actor**: Admin username
+  - **detail**: { user_id, changes }
+</ResponseField>
+
+<ResponseField name="user_deleted">
+  User account deleted
+  - **actor**: Admin username
+  - **detail**: { user_id, username }
+</ResponseField>
+
+### Settings & Configuration
+
+<ResponseField name="settings_update">
+  System settings modified
+  - **actor**: Admin username
+  - **detail**: Object with updated keys array and changes object
+</ResponseField>
+
+<ResponseField name="settings_reset">
+  Setting reset to default value
+  - **actor**: Admin username
+  - **detail**: { key, old_value }
+</ResponseField>
+
+### Backup & Maintenance
+
+<ResponseField name="backup_create">
+  Manual backup created via API
+  - **actor**: Admin username
+  - **detail**: { path, size }
+</ResponseField>
+
+<ResponseField name="backup_delete">
+  Backup file deleted
+  - **actor**: Admin username
+  - **detail**: { name }
+</ResponseField>
+
+<ResponseField name="auto_backup">
+  Scheduled automatic backup
+  - **actor**: `scheduler`
+  - **detail**: { path, size }
+</ResponseField>
+
+<ResponseField name="auto_cleanup">
+  Scheduled data cleanup
+  - **actor**: `scheduler`
+  - **detail**: { total_deleted }
+</ResponseField>
+
+### Agents & Tasks
+
+<ResponseField name="agent_created">
+  New agent registered
+  - **actor**: Username or `system`
+  - **detail**: { agent_id, agent_name }
+</ResponseField>
+
+<ResponseField name="agent_deleted">
+  Agent removed
+  - **actor**: Admin username
+  - **detail**: { agent_id, agent_name }
+</ResponseField>
+
+<ResponseField name="heartbeat_check">
+  Scheduled heartbeat check marked agents offline
+  - **actor**: `scheduler`
+  - **detail**: Object with marked_offline array
+</ResponseField>
+
+<ResponseField name="task_created">
+  New task created
+  - **actor**: Username
+  - **detail**: { task_id, title }
+</ResponseField>
+
+<ResponseField name="task_assigned">
+  Task assigned to agent
+  - **actor**: Username
+  - **detail**: { task_id, assigned_to }
+</ResponseField>
+
+## Pagination Example
+
+Query large audit logs using offset-based pagination:
+
+```bash
+# First page (0-99)
+curl -X GET "https://your-domain.com/api/audit?limit=100&offset=0" \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN"
+
+# Second page (100-199)
+curl -X GET "https://your-domain.com/api/audit?limit=100&offset=100" \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN"
+
+# Third page (200-299)
+curl -X GET "https://your-domain.com/api/audit?limit=100&offset=200" \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN"
+```
+
+## Time Range Queries
+
+Query events within a specific time window:
+
+```bash
+# Events from the last 24 hours
+SINCE=$(date -d '24 hours ago' +%s)
+curl -X GET "https://your-domain.com/api/audit?since=$SINCE" \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN"
+
+# Events from March 2026
+SINCE=$(date -d '2026-03-01' +%s)
+UNTIL=$(date -d '2026-04-01' +%s)
+curl -X GET "https://your-domain.com/api/audit?since=$SINCE&until=$UNTIL" \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN"
+```
+
+## Actor Filtering
+
+Track actions by specific users or system processes:
+
+```bash
+# All actions by admin user
+curl -X GET "https://your-domain.com/api/audit?actor=admin" \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN"
+
+# All automated scheduler actions
+curl -X GET "https://your-domain.com/api/audit?actor=scheduler" \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN"
+
+# All system-initiated events
+curl -X GET "https://your-domain.com/api/audit?actor=system" \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN"
+```
+
+## Error Responses
+
+<ResponseField name="400 Bad Request">
+  Invalid query parameters (e.g., limit exceeds maximum)
+</ResponseField>
+
+<ResponseField name="401 Unauthorized">
+  User is not authenticated. Check session cookie.
+</ResponseField>
+
+<ResponseField name="403 Forbidden">
+  User does not have admin role. Only admins can access audit logs.
+</ResponseField>
+
+## Audit Log Retention
+
+Audit events are automatically cleaned up based on the `retention.audit_log_days` setting:
+
+- Default retention: 180 days
+- Cleanup runs daily at 4:00 AM UTC when `general.auto_cleanup` is enabled
+- Change retention period via Settings API:
+  ```bash
+  curl -X PUT https://your-domain.com/api/settings \
+    -H "Cookie: mc-session=YOUR_SESSION_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"settings": {"retention.audit_log_days": "365"}}'
+  ```
+
+## Security Considerations
+
+1. **Access Control**: Only admin users can query audit logs
+2. **IP Logging**: User actions include source IP addresses
+3. **Immutable Records**: Audit events cannot be modified or deleted via API
+4. **Tamper Detection**: Monitor `settings_update` events for unauthorized configuration changes
+5. **Compliance**: Retain logs for regulatory requirements using the retention setting
+
+## Common Use Cases
+
+### Security Monitoring
+```bash
+# Failed login attempts
+curl -X GET "https://your-domain.com/api/audit?action=login" \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN"
+
+# User privilege changes
+curl -X GET "https://your-domain.com/api/audit?action=user_updated" \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN"
+```
+
+### Change Tracking
+```bash
+# Configuration changes in the last week
+SINCE=$(date -d '7 days ago' +%s)
+curl -X GET "https://your-domain.com/api/audit?action=settings_update&since=$SINCE" \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN"
+```
+
+### Backup Verification
+```bash
+# Recent backup operations
+curl -X GET "https://your-domain.com/api/audit?action=auto_backup&limit=10" \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN"
+```

@@ -1,0 +1,468 @@
+---
+title: 'Device Identity (Ed25519)'
+description: 'Secure WebSocket authentication using Ed25519 signing and challenge-response protocol'
+icon: 'shield-check'
+---
+
+## Overview
+
+**Device Identity** provides cryptographic authentication for WebSocket connections using **Ed25519 digital signatures**. Each browser generates a persistent key pair and signs server challenges during the gateway handshake, enabling secure device-level authentication beyond simple API tokens.
+
+<Info>
+This implements OpenClaw gateway protocol v3 challenge-response. The system gracefully falls back to token-only auth if Ed25519 is unavailable (older browsers).
+</Info>
+
+## Architecture
+
+The device identity system has three layers:
+
+<Steps>
+  <Step title="Key Generation">
+    On first use, the browser generates an Ed25519 key pair and stores it in `localStorage`:
+
+    ```typescript
+    const keyPair = await crypto.subtle.generateKey(
+      'Ed25519',
+      true,  // extractable
+      ['sign', 'verify']
+    )
+
+    const pubRaw = await crypto.subtle.exportKey('raw', keyPair.publicKey)
+    const privPkcs8 = await crypto.subtle.exportKey('pkcs8', keyPair.privateKey)
+
+    // Device ID = SHA-256(public key) in lowercase hex
+    const deviceId = await sha256Hex(pubRaw)
+    ```
+  </Step>
+
+  <Step title="Challenge-Response">
+    During WebSocket connect, the gateway sends a nonce. The client signs it:
+
+    ```typescript
+    // Gateway sends: { type: 'auth-challenge', nonce: 'random-string' }
+
+    // Client signs nonce with private key
+    const signature = await signPayload(privateKey, nonce, Date.now())
+
+    // Client responds:
+    {
+      type: 'auth-response',
+      device: {
+        id: deviceId,              // SHA-256(public key)
+        publicKey: publicKeyBase64, // Base64url-encoded raw key
+        signature: signature,       // Base64url-encoded signature
+        signedAt: timestamp         // Signature timestamp
+      },
+      token: gatewayToken  // Optional gateway auth token
+    }
+    ```
+  </Step>
+
+  <Step title="Token Caching">
+    On successful auth, the gateway returns a device token cached for reuse:
+
+    ```typescript
+    // Gateway responds: { type: 'auth-success', deviceToken: '...' }
+
+    cacheDeviceToken(deviceToken)
+    // Stored in localStorage: 'mc-device-token'
+    ```
+  </Step>
+</Steps>
+
+## Implementation
+
+The complete device identity module:
+
+<CodeGroup>
+```typescript src/lib/device-identity.ts (Key Storage)
+// localStorage keys
+const STORAGE_DEVICE_ID = 'mc-device-id'
+const STORAGE_PUBKEY = 'mc-device-pubkey'
+const STORAGE_PRIVKEY = 'mc-device-privkey'
+const STORAGE_DEVICE_TOKEN = 'mc-device-token'
+
+export interface DeviceIdentity {
+  deviceId: string              // SHA-256(publicKey) hex
+  publicKeyBase64: string       // Base64url raw public key
+  privateKey: CryptoKey         // Non-extractable after import
+}
+```
+
+```typescript src/lib/device-identity.ts (Key Generation)
+async function createNewIdentity(): Promise<DeviceIdentity> {
+  const keyPair = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify'])
+
+  const pubRaw = await crypto.subtle.exportKey('raw', keyPair.publicKey)
+  const privPkcs8 = await crypto.subtle.exportKey('pkcs8', keyPair.privateKey)
+
+  // OpenClaw expects device.id = sha256(rawPublicKey) in lowercase hex
+  const deviceId = await sha256Hex(pubRaw)
+  const publicKeyBase64 = toBase64Url(pubRaw)
+  const privateKeyBase64 = toBase64Url(privPkcs8)
+
+  localStorage.setItem(STORAGE_DEVICE_ID, deviceId)
+  localStorage.setItem(STORAGE_PUBKEY, publicKeyBase64)
+  localStorage.setItem(STORAGE_PRIVKEY, privateKeyBase64)
+
+  return {
+    deviceId,
+    publicKeyBase64,
+    privateKey: keyPair.privateKey,
+  }
+}
+```
+
+```typescript src/lib/device-identity.ts (Key Loading)
+export async function getOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
+  const storedId = localStorage.getItem(STORAGE_DEVICE_ID)
+  const storedPub = localStorage.getItem(STORAGE_PUBKEY)
+  const storedPriv = localStorage.getItem(STORAGE_PRIVKEY)
+
+  if (storedId && storedPub && storedPriv) {
+    try {
+      const privateKey = await importPrivateKey(fromBase64Url(storedPriv))
+      return {
+        deviceId: storedId,
+        publicKeyBase64: storedPub,
+        privateKey,
+      }
+    } catch {
+      // Stored key corrupted — regenerate
+      console.warn('Device identity keys corrupted, regenerating...')
+    }
+  }
+
+  return createNewIdentity()
+}
+
+async function importPrivateKey(pkcs8Bytes: Uint8Array): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    'pkcs8',
+    pkcs8Bytes,
+    'Ed25519',
+    false,  // non-extractable for security
+    ['sign']
+  )
+}
+```
+
+```typescript src/lib/device-identity.ts (Signing)
+export async function signPayload(
+  privateKey: CryptoKey,
+  payload: string,
+  signedAt = Date.now()
+): Promise<{ signature: string; signedAt: number }> {
+  const encoder = new TextEncoder()
+  const payloadBytes = encoder.encode(payload)
+  const signatureBuffer = await crypto.subtle.sign('Ed25519', privateKey, payloadBytes)
+  
+  return {
+    signature: toBase64Url(signatureBuffer),
+    signedAt,
+  }
+}
+```
+</CodeGroup>
+
+## Base64url Encoding
+
+The protocol uses base64url (RFC 4648) for binary data:
+
+<Tabs>
+  <Tab title="Encode">
+    ```typescript
+    function toBase64Url(buffer: ArrayBuffer): string {
+      const bytes = new Uint8Array(buffer)
+      let binary = ''
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i])
+      }
+      return btoa(binary)
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/g, '')
+    }
+    ```
+  </Tab>
+
+  <Tab title="Decode">
+    ```typescript
+    function fromBase64Url(value: string): Uint8Array {
+      const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+      const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
+      const binary = atob(padded)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i)
+      }
+      return bytes
+    }
+    ```
+  </Tab>
+
+  <Tab title="SHA-256">
+    ```typescript
+    async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
+      const digest = await crypto.subtle.digest('SHA-256', new Uint8Array(buffer))
+      const bytes = new Uint8Array(digest)
+      return Array.from(bytes)
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('')
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## WebSocket Challenge-Response
+
+The complete handshake flow:
+
+<Steps>
+  <Step title="Connect">
+    Client initiates WebSocket connection to gateway:
+
+    ```typescript
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    const wsUrl = `${proto}://gateway-host:18789`
+    const ws = new WebSocket(wsUrl)
+    ```
+  </Step>
+
+  <Step title="Challenge">
+    Gateway sends auth challenge with random nonce:
+
+    ```json
+    {
+      "type": "auth-challenge",
+      "nonce": "b3f8e19d-4c2a-4e7f-9a1b-5d8c3e6f2a4d"
+    }
+    ```
+  </Step>
+
+  <Step title="Sign">
+    Client signs nonce with device private key:
+
+    ```typescript
+    const identity = await getOrCreateDeviceIdentity()
+    const { signature, signedAt } = await signPayload(
+      identity.privateKey,
+      challenge.nonce
+    )
+    ```
+  </Step>
+
+  <Step title="Respond">
+    Client sends auth response with signature:
+
+    ```json
+    {
+      "type": "auth-response",
+      "device": {
+        "id": "a3c8f29e7b4d1c5e9f8a2b3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f",
+        "publicKey": "MCowBQYDK2VwAyEA...",
+        "signature": "dGhpcyBpcyBhIHNpZ25hdHVyZQ...",
+        "signedAt": 1709568000000
+      },
+      "token": "gateway-auth-token"
+    }
+    ```
+  </Step>
+
+  <Step title="Verify (Gateway)">
+    Gateway verifies signature and responds:
+
+    ```typescript
+    // Gateway verifies:
+    const isValid = await crypto.subtle.verify(
+      'Ed25519',
+      publicKey,
+      signature,
+      nonce
+    )
+
+    if (isValid) {
+      const deviceToken = generateDeviceToken()
+      send({ type: 'auth-success', deviceToken })
+    }
+    ```
+  </Step>
+
+  <Step title="Cache Token">
+    Client caches device token for future connections:
+
+    ```typescript
+    export function cacheDeviceToken(token: string): void {
+      localStorage.setItem(STORAGE_DEVICE_TOKEN, token)
+    }
+
+    export function getCachedDeviceToken(): string | null {
+      return localStorage.getItem(STORAGE_DEVICE_TOKEN)
+    }
+    ```
+  </Step>
+</Steps>
+
+## Security Properties
+
+<Tabs>
+  <Tab title="Key Security">
+    - **Ed25519**: State-of-the-art elliptic curve signature scheme
+    - **Non-extractable**: Private key cannot be exported after import
+    - **localStorage**: Keys persist across browser sessions
+    - **Device-specific**: Each browser instance has unique identity
+  </Tab>
+
+  <Tab title="Protocol Security">
+    - **Challenge-response**: Prevents replay attacks
+    - **Timestamp**: `signedAt` field provides freshness guarantee
+    - **Public key transmission**: Only public key sent over wire
+    - **Token-based fallback**: System works without device identity
+  </Tab>
+
+  <Tab title="Attack Resistance">
+    - **Replay attacks**: Nonce is single-use, signature includes timestamp
+    - **Man-in-the-middle**: Use WSS (WebSocket Secure) in production
+    - **Key extraction**: Private key stored in non-extractable CryptoKey
+    - **Signature forgery**: Ed25519 provides 128-bit security level
+  </Tab>
+</Tabs>
+
+## Graceful Degradation
+
+The system falls back when Ed25519 is unavailable:
+
+```typescript
+export async function getOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
+  try {
+    // Try Ed25519
+    return await getOrCreateDeviceIdentityInternal()
+  } catch (error) {
+    if (error.name === 'NotSupportedError') {
+      console.warn('Ed25519 not supported, using token-only auth')
+      // Fall back to gateway token only
+      return null
+    }
+    throw error
+  }
+}
+
+// In WebSocket connect:
+if (deviceIdentity) {
+  // Send challenge-response with device identity
+  sendAuthResponse({ device, token })
+} else {
+  // Send token-only auth
+  sendAuthResponse({ token })
+}
+```
+
+<Warning>
+**Browser Compatibility**: Ed25519 requires Chrome 113+, Firefox 102+, Safari 17+. Older browsers fall back to token-only authentication.
+</Warning>
+
+## Management Operations
+
+### Clear Device Identity
+
+Force regeneration of device keys:
+
+```typescript
+export function clearDeviceIdentity(): void {
+  localStorage.removeItem(STORAGE_DEVICE_ID)
+  localStorage.removeItem(STORAGE_PUBKEY)
+  localStorage.removeItem(STORAGE_PRIVKEY)
+  localStorage.removeItem(STORAGE_DEVICE_TOKEN)
+}
+
+// Use from browser console:
+// clearDeviceIdentity()
+// location.reload()
+```
+
+### Inspect Device Identity
+
+View current device ID:
+
+```typescript
+import { getOrCreateDeviceIdentity } from '@/lib/device-identity'
+
+const identity = await getOrCreateDeviceIdentity()
+console.log('Device ID:', identity.deviceId)
+console.log('Public Key:', identity.publicKeyBase64)
+```
+
+### Export for Gateway Registration
+
+Some gateways require pre-registration:
+
+```typescript
+const identity = await getOrCreateDeviceIdentity()
+const registration = {
+  deviceId: identity.deviceId,
+  publicKey: identity.publicKeyBase64,
+  name: 'Mission Control Browser',
+  createdAt: new Date().toISOString(),
+}
+
+console.log(JSON.stringify(registration, null, 2))
+```
+
+## Troubleshooting
+
+<Steps>
+  <Step title="Connection fails with 'Invalid signature'">
+    - Clear device identity and regenerate: `clearDeviceIdentity()`
+    - Check browser console for Ed25519 support errors
+    - Verify gateway is running protocol v3
+    - Ensure system clock is synchronized (signature timestamp validation)
+  </Step>
+
+  <Step title="Keys corrupted or not loading">
+    - Check localStorage size limits (5-10MB per origin)
+    - Verify no extensions clearing localStorage
+    - Inspect Application > Local Storage in DevTools
+    - Force regeneration with `clearDeviceIdentity()`
+  </Step>
+
+  <Step title="Fallback to token-only auth">
+    - Check browser version (Ed25519 requires modern browsers)
+    - Verify `crypto.subtle` is available (requires HTTPS or localhost)
+    - Review browser console for "NotSupportedError" messages
+  </Step>
+</Steps>
+
+## Best Practices
+
+<Warning>
+**Production Deployments**: Always use WSS (WebSocket Secure) in production. Ed25519 signatures don't encrypt the payload—they only provide authentication.
+</Warning>
+
+<Tabs>
+  <Tab title="Key Management">
+    - Never export or share private keys
+    - Document device IDs for audit trails
+    - Use device tokens for session continuity
+    - Rotate device identity on security events
+  </Tab>
+
+  <Tab title="Gateway Configuration">
+    - Enforce signature timestamp checks (±5 minutes)
+    - Log device IDs for security auditing
+    - Rate-limit auth attempts per device
+    - Support both device identity and token-only auth
+  </Tab>
+
+  <Tab title="Error Handling">
+    - Gracefully degrade to token-only auth
+    - Show clear UI feedback for auth failures
+    - Log crypto errors for debugging
+    - Implement reconnection with backoff
+  </Tab>
+</Tabs>
+
+## Related
+
+- [Multi-Gateway](/advanced/multi-gateway) - Managing gateway connections
+- [Events API](/api/events) - Real-time event protocol
+- [Security](/deployment/security) - Production security guidelines

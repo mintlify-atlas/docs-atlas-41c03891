@@ -1,0 +1,685 @@
+---
+title: 'Tokens API'
+description: 'Track token usage, analyze costs, and export usage data'
+icon: 'coins'
+---
+
+## Overview
+
+The Tokens API provides comprehensive token usage tracking and cost analysis across all agents, models, and sessions. Track consumption patterns, analyze costs per agent, and export data for billing and optimization.
+
+## Authentication
+
+All token endpoints require authentication via:
+- **Session Cookie**: `mc-session` (set after login)
+- **API Key**: `x-api-key` header
+
+Minimum role requirements:
+- **GET**: Viewer role
+- **POST**: Operator role
+
+---
+
+## Query Token Usage
+
+<Card title="GET /api/tokens" icon="chart-line">
+Query token usage with multiple action modes for different use cases.
+</Card>
+
+**Authorization:** Viewer role required
+
+### Query Parameters
+
+<ParamField query="action" type="string" default="list">
+  Query action to perform
+  <Expandable title="Available actions">
+    - `list` - List recent token usage records
+    - `stats` - Get aggregated statistics
+    - `agent-costs` - Per-agent cost breakdown with timelines
+    - `export` - Export data (JSON or CSV)
+    - `trends` - Hourly usage trends (last 24 hours)
+  </Expandable>
+</ParamField>
+
+<ParamField query="timeframe" type="string" default="all">
+  Time window for data filtering
+  <Expandable title="Allowed values">
+    - `hour` - Last 60 minutes
+    - `day` - Last 24 hours
+    - `week` - Last 7 days
+    - `month` - Last 30 days
+    - `all` - All recorded data
+  </Expandable>
+</ParamField>
+
+<ParamField query="format" type="string" default="json">
+  Export format (only for `action=export`)
+  <Expandable title="Allowed values">
+    - `json` - JSON format
+    - `csv` - CSV format
+  </Expandable>
+</ParamField>
+
+---
+
+## Action: List
+
+<Card title="List Token Usage Records" icon="list">
+Retrieve recent token usage records with pagination.
+</Card>
+
+### Request
+
+```bash
+GET /api/tokens?action=list&timeframe=day&limit=100
+```
+
+### Response Fields
+
+<ResponseField name="usage" type="array">
+  Array of token usage records (max 100)
+  <Expandable title="TokenUsageRecord Object">
+    <ResponseField name="id" type="string">
+      Unique record identifier
+    </ResponseField>
+    <ResponseField name="model" type="string">
+      Model identifier (e.g., "claude-sonnet-4", "gpt-4")
+    </ResponseField>
+    <ResponseField name="sessionId" type="string">
+      Session identifier
+    </ResponseField>
+    <ResponseField name="agentName" type="string">
+      Agent name extracted from session ID
+    </ResponseField>
+    <ResponseField name="timestamp" type="integer">
+      Unix timestamp (milliseconds)
+    </ResponseField>
+    <ResponseField name="inputTokens" type="integer">
+      Input tokens consumed
+    </ResponseField>
+    <ResponseField name="outputTokens" type="integer">
+      Output tokens generated
+    </ResponseField>
+    <ResponseField name="totalTokens" type="integer">
+      Total tokens (input + output)
+    </ResponseField>
+    <ResponseField name="cost" type="number">
+      Estimated cost in USD
+    </ResponseField>
+    <ResponseField name="operation" type="string">
+      Operation type (e.g., "chat_completion", "heartbeat")
+    </ResponseField>
+    <ResponseField name="duration" type="number">
+      Request duration in milliseconds (optional)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="total" type="integer">
+  Total number of records matching filters
+</ResponseField>
+
+<ResponseField name="timeframe" type="string">
+  Applied timeframe filter
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://your-domain.com/api/tokens?action=list&timeframe=day" \
+  -H "x-api-key: your-api-key"
+```
+
+```javascript JavaScript
+const response = await fetch('/api/tokens?action=list&timeframe=day', {
+  headers: {
+    'x-api-key': 'your-api-key'
+  }
+});
+const data = await response.json();
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'https://your-domain.com/api/tokens',
+    params={'action': 'list', 'timeframe': 'day'},
+    headers={'x-api-key': 'your-api-key'}
+)
+usage = response.json()
+```
+</CodeGroup>
+
+### Example Response
+
+```json
+{
+  "usage": [
+    {
+      "id": "db-12345",
+      "model": "claude-sonnet-4",
+      "sessionId": "code-reviewer:chat",
+      "agentName": "code-reviewer",
+      "timestamp": 1709856000000,
+      "inputTokens": 1523,
+      "outputTokens": 842,
+      "totalTokens": 2365,
+      "cost": 0.007095,
+      "operation": "heartbeat",
+      "duration": 1250
+    }
+  ],
+  "total": 1,
+  "timeframe": "day"
+}
+```
+
+---
+
+## Action: Stats
+
+<Card title="Get Aggregated Statistics" icon="chart-bar">
+Retrieve aggregated token usage and cost statistics.
+</Card>
+
+### Request
+
+```bash
+GET /api/tokens?action=stats&timeframe=week
+```
+
+### Response Fields
+
+<ResponseField name="summary" type="object">
+  Overall statistics
+  <Expandable title="TokenStats Object">
+    <ResponseField name="totalTokens" type="integer">Total tokens consumed</ResponseField>
+    <ResponseField name="totalCost" type="number">Total cost in USD</ResponseField>
+    <ResponseField name="requestCount" type="integer">Number of requests</ResponseField>
+    <ResponseField name="avgTokensPerRequest" type="integer">Average tokens per request</ResponseField>
+    <ResponseField name="avgCostPerRequest" type="number">Average cost per request</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="models" type="object">
+  Statistics broken down by model (key: model name, value: TokenStats)
+</ResponseField>
+
+<ResponseField name="sessions" type="object">
+  Statistics broken down by session (key: session ID, value: TokenStats)
+</ResponseField>
+
+<ResponseField name="agents" type="object">
+  Statistics broken down by agent (key: agent name, value: TokenStats)
+</ResponseField>
+
+<ResponseField name="timeframe" type="string">
+  Applied timeframe filter
+</ResponseField>
+
+<ResponseField name="recordCount" type="integer">
+  Number of records analyzed
+</ResponseField>
+
+### Example Request
+
+```bash cURL
+curl -X GET "https://your-domain.com/api/tokens?action=stats&timeframe=week" \
+  -H "x-api-key: your-api-key"
+```
+
+### Example Response
+
+```json
+{
+  "summary": {
+    "totalTokens": 1253842,
+    "totalCost": 3.76,
+    "requestCount": 342,
+    "avgTokensPerRequest": 3665,
+    "avgCostPerRequest": 0.011
+  },
+  "models": {
+    "claude-sonnet-4": {
+      "totalTokens": 985234,
+      "totalCost": 2.96,
+      "requestCount": 280,
+      "avgTokensPerRequest": 3519,
+      "avgCostPerRequest": 0.0106
+    },
+    "claude-3-5-haiku": {
+      "totalTokens": 268608,
+      "totalCost": 0.067,
+      "requestCount": 62,
+      "avgTokensPerRequest": 4332,
+      "avgCostPerRequest": 0.0011
+    }
+  },
+  "agents": {
+    "code-reviewer": {
+      "totalTokens": 523842,
+      "totalCost": 1.57,
+      "requestCount": 145,
+      "avgTokensPerRequest": 3613,
+      "avgCostPerRequest": 0.0108
+    },
+    "task-manager": {
+      "totalTokens": 730000,
+      "totalCost": 2.19,
+      "requestCount": 197,
+      "avgTokensPerRequest": 3706,
+      "avgCostPerRequest": 0.0111
+    }
+  },
+  "timeframe": "week",
+  "recordCount": 342
+}
+```
+
+---
+
+## Action: Agent Costs
+
+<Card title="Per-Agent Cost Breakdown" icon="users">
+Detailed cost analysis per agent with model breakdown and daily timelines.
+</Card>
+
+### Request
+
+```bash
+GET /api/tokens?action=agent-costs&timeframe=month
+```
+
+### Response Fields
+
+<ResponseField name="agents" type="object">
+  Cost breakdown per agent (key: agent name)
+  <Expandable title="Agent Cost Object">
+    <ResponseField name="stats" type="object">
+      Overall agent statistics (TokenStats format)
+    </ResponseField>
+    <ResponseField name="models" type="object">
+      Per-model breakdown (key: model name, value: TokenStats)
+    </ResponseField>
+    <ResponseField name="sessions" type="array">
+      Array of unique session IDs for this agent
+    </ResponseField>
+    <ResponseField name="timeline" type="array">
+      Daily cost and token timeline
+      <Expandable title="Timeline Entry">
+        <ResponseField name="date" type="string">Date (YYYY-MM-DD)</ResponseField>
+        <ResponseField name="cost" type="number">Total cost for day</ResponseField>
+        <ResponseField name="tokens" type="integer">Total tokens for day</ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="timeframe" type="string">
+  Applied timeframe filter
+</ResponseField>
+
+<ResponseField name="recordCount" type="integer">
+  Number of records analyzed
+</ResponseField>
+
+### Example Request
+
+```bash cURL
+curl -X GET "https://your-domain.com/api/tokens?action=agent-costs&timeframe=month" \
+  -H "x-api-key: your-api-key"
+```
+
+### Example Response
+
+```json
+{
+  "agents": {
+    "code-reviewer": {
+      "stats": {
+        "totalTokens": 2453842,
+        "totalCost": 7.36,
+        "requestCount": 687,
+        "avgTokensPerRequest": 3571,
+        "avgCostPerRequest": 0.0107
+      },
+      "models": {
+        "claude-sonnet-4": {
+          "totalTokens": 2250000,
+          "totalCost": 6.75,
+          "requestCount": 630,
+          "avgTokensPerRequest": 3571,
+          "avgCostPerRequest": 0.0107
+        },
+        "claude-3-5-haiku": {
+          "totalTokens": 203842,
+          "totalCost": 0.051,
+          "requestCount": 57,
+          "avgTokensPerRequest": 3577,
+          "avgCostPerRequest": 0.0009
+        }
+      },
+      "sessions": [
+        "code-reviewer:chat",
+        "code-reviewer:cron"
+      ],
+      "timeline": [
+        {
+          "date": "2026-02-15",
+          "cost": 0.42,
+          "tokens": 140234
+        },
+        {
+          "date": "2026-02-16",
+          "cost": 0.38,
+          "tokens": 126842
+        }
+      ]
+    }
+  },
+  "timeframe": "month",
+  "recordCount": 687
+}
+```
+
+---
+
+## Action: Export
+
+<Card title="Export Usage Data" icon="download">
+Export complete token usage data in JSON or CSV format.
+</Card>
+
+### Request
+
+```bash
+GET /api/tokens?action=export&timeframe=week&format=csv
+```
+
+### Response
+
+Returns file download with appropriate Content-Disposition header.
+
+**JSON Export:**
+- Content-Type: `application/json`
+- Includes: usage records, summary stats, model stats, session stats
+
+**CSV Export:**
+- Content-Type: `text/csv`
+- Columns: timestamp, agentName, model, sessionId, operation, inputTokens, outputTokens, totalTokens, cost, duration
+
+### Example Request
+
+<CodeGroup>
+```bash cURL - JSON
+curl -X GET "https://your-domain.com/api/tokens?action=export&timeframe=week&format=json" \
+  -H "x-api-key: your-api-key" \
+  -o token-usage.json
+```
+
+```bash cURL - CSV
+curl -X GET "https://your-domain.com/api/tokens?action=export&timeframe=week&format=csv" \
+  -H "x-api-key: your-api-key" \
+  -o token-usage.csv
+```
+
+```javascript JavaScript
+const response = await fetch('/api/tokens?action=export&format=csv&timeframe=week', {
+  headers: {
+    'x-api-key': 'your-api-key'
+  }
+});
+const blob = await response.blob();
+const url = window.URL.createObjectURL(blob);
+const a = document.createElement('a');
+a.href = url;
+a.download = 'token-usage.csv';
+a.click();
+```
+</CodeGroup>
+
+---
+
+## Action: Trends
+
+<Card title="Hourly Usage Trends" icon="chart-line">
+Get hourly token usage and cost trends for the last 24 hours.
+</Card>
+
+### Request
+
+```bash
+GET /api/tokens?action=trends
+```
+
+### Response Fields
+
+<ResponseField name="trends" type="array">
+  Array of hourly data points
+  <Expandable title="Trend Object">
+    <ResponseField name="timestamp" type="string">
+      ISO 8601 timestamp (hour precision)
+    </ResponseField>
+    <ResponseField name="tokens" type="integer">
+      Total tokens for this hour
+    </ResponseField>
+    <ResponseField name="cost" type="number">
+      Total cost for this hour
+    </ResponseField>
+    <ResponseField name="requests" type="integer">
+      Number of requests in this hour
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="timeframe" type="string">
+  Applied timeframe (always includes recent 24h)
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "trends": [
+    {
+      "timestamp": "2026-03-04T12:00:00.000Z",
+      "tokens": 45234,
+      "cost": 0.136,
+      "requests": 12
+    },
+    {
+      "timestamp": "2026-03-04T13:00:00.000Z",
+      "tokens": 52891,
+      "cost": 0.159,
+      "requests": 15
+    }
+  ],
+  "timeframe": "day"
+}
+```
+
+---
+
+## Record Token Usage
+
+<Card title="POST /api/tokens" icon="plus">
+Manually record token usage for a session.
+</Card>
+
+**Authorization:** Operator role required
+
+### Request Body
+
+<ParamField body="model" type="string" required>
+  Model identifier (e.g., "claude-sonnet-4")
+</ParamField>
+
+<ParamField body="sessionId" type="string" required>
+  Session identifier
+</ParamField>
+
+<ParamField body="inputTokens" type="integer" required>
+  Number of input tokens
+</ParamField>
+
+<ParamField body="outputTokens" type="integer" required>
+  Number of output tokens
+</ParamField>
+
+<ParamField body="operation" type="string" default="chat_completion">
+  Operation type
+</ParamField>
+
+<ParamField body="duration" type="number">
+  Request duration in milliseconds
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Whether recording was successful
+</ResponseField>
+
+<ResponseField name="record" type="object">
+  Created TokenUsageRecord object
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://your-domain.com/api/tokens" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "model": "claude-sonnet-4",
+    "sessionId": "code-reviewer:chat",
+    "inputTokens": 1523,
+    "outputTokens": 842,
+    "operation": "code_review",
+    "duration": 1250
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('/api/tokens', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'x-api-key': 'your-api-key'
+  },
+  body: JSON.stringify({
+    model: 'claude-sonnet-4',
+    sessionId: 'code-reviewer:chat',
+    inputTokens: 1523,
+    outputTokens: 842,
+    operation: 'code_review',
+    duration: 1250
+  })
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "record": {
+    "id": "1709856400000-abc123xyz",
+    "model": "claude-sonnet-4",
+    "sessionId": "code-reviewer:chat",
+    "agentName": "code-reviewer",
+    "timestamp": 1709856400000,
+    "inputTokens": 1523,
+    "outputTokens": 842,
+    "totalTokens": 2365,
+    "cost": 0.007095,
+    "operation": "code_review",
+    "duration": 1250
+  }
+}
+```
+
+---
+
+## Model Pricing
+
+<Card title="Supported Models & Pricing" icon="dollar-sign">
+Pricing per 1,000 tokens for supported models.
+</Card>
+
+### Pricing Table
+
+| Model | Cost per 1K tokens | Provider |
+|-------|-------------------|----------|
+| `claude-sonnet-4` | $3.00 | Anthropic |
+| `claude-3-5-haiku` | $0.25 | Anthropic |
+| `claude-opus-4-5` | $15.00 | Anthropic |
+| `llama-3.1-8b-instant` | $0.05 | Groq |
+| `llama-3.3-70b-versatile` | $0.59 | Groq |
+| `kimi-k2.5` | $1.00 | Moonshot |
+| `minimax-m2.1` | $0.30 | Minimax |
+| `ollama/deepseek-r1:14b` | $0.00 | Ollama (local) |
+| `ollama/qwen2.5-coder:7b` | $0.00 | Ollama (local) |
+| `ollama/qwen2.5-coder:14b` | $0.00 | Ollama (local) |
+
+<Note>
+Pricing is automatically calculated based on model names. If an exact match isn't found, Mission Control attempts partial matching (e.g., "claude-sonnet" matches "anthropic/claude-sonnet-4"). Unknown models default to $1.00 per 1K tokens.
+</Note>
+
+---
+
+## Data Sources
+
+<Card title="Token Data Sources" icon="database">
+How Mission Control aggregates token usage data.
+</Card>
+
+### Priority Order
+
+1. **Token Usage Database** (Primary)
+   - Stored in `token_usage` SQLite table
+   - Most authoritative source
+   - Includes heartbeat data from agents
+
+2. **JSON File Storage** (Secondary)
+   - Manually recorded usage via POST endpoint
+   - File location: configured in `tokensPath`
+   - Limited to 10,000 most recent records
+
+3. **Gateway Sessions** (Fallback)
+   - Derived from active OpenClaw sessions
+   - Used when no persistent data exists
+   - Real-time but less comprehensive
+
+---
+
+## Best Practices
+
+<Card title="Optimization Tips" icon="lightbulb">
+Recommendations for token usage monitoring and cost optimization.
+</Card>
+
+### Cost Monitoring
+
+1. **Set up regular exports** - Export data weekly for billing analysis
+2. **Monitor agent-costs** - Identify high-cost agents for optimization
+3. **Track model usage** - Use cheaper models (Haiku) for simple tasks
+4. **Review trends** - Identify usage spikes and anomalies
+
+### Performance
+
+- Use `timeframe` parameter to limit data volume
+- Export CSV for large datasets (more efficient than JSON)
+- Cache stats responses for dashboards
+- Use agent-costs for detailed analysis, stats for quick overview
+
+### Data Retention
+
+- JSON file storage limited to 10,000 records
+- Database storage unlimited (manage via SQL if needed)
+- Consider periodic exports for long-term archival

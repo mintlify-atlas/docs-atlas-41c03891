@@ -1,0 +1,388 @@
+---
+title: 'Agent SOUL System'
+description: 'Define agent personality, capabilities, and behavioral guidelines with bidirectional workspace sync'
+icon: 'brain'
+---
+
+## Overview
+
+The **Agent SOUL System** lets you define agent personality, capabilities, and behavioral guidelines through markdown files. Changes sync bidirectionally between the UI database and workspace `soul.md` files—edit in either location and both stay in sync.
+
+<Info>
+SOUL files use a simple markdown format with frontmatter-style metadata. The system automatically parses identity information and maintains consistency across your agent fleet.
+</Info>
+
+## Workspace Sync Architecture
+
+Mission Control reads agent configurations from `openclaw.json` and enriches them with workspace files:
+
+```typescript
+// src/lib/agent-sync.ts
+function enrichAgentConfigFromWorkspace(configData: any): any {
+  const workspace = configData.workspace
+  if (!workspace) return configData
+
+  // Read identity.md and TOOLS.md from agent workspace
+  const identityFile = readWorkspaceFile(workspace, 'identity.md')
+  const toolsFile = readWorkspaceFile(workspace, 'TOOLS.md')
+
+  // Parse and merge with config
+  const mergedIdentity = {
+    ...parseIdentityFromFile(identityFile || ''),
+    ...configData.identity,
+  }
+
+  return {
+    ...configData,
+    identity: mergedIdentity,
+    tools: mergedTools,
+  }
+}
+```
+
+## SOUL File Format
+
+SOUL files follow a simple markdown structure:
+
+<CodeGroup>
+```markdown soul.md
+# Agent Name
+
+theme: engineering specialist
+emoji: 🔧
+
+## Core Capabilities
+
+- Code review and refactoring
+- Architecture design
+- Performance optimization
+
+## Behavioral Guidelines
+
+- Prioritize code quality and maintainability
+- Provide detailed explanations
+- Ask clarifying questions before major changes
+
+## Communication Style
+
+Professional, concise, technically accurate. Use code examples.
+```
+
+```json openclaw.json
+{
+  "agents": {
+    "list": [
+      {
+        "id": "engineer-01",
+        "name": "Engineering Specialist",
+        "workspace": "agents/engineer-01",
+        "identity": {
+          "name": "Engineering Specialist",
+          "theme": "engineering specialist",
+          "emoji": "🔧"
+        }
+      }
+    ]
+  }
+}
+```
+</CodeGroup>
+
+## Bidirectional Sync
+
+Changes sync automatically in both directions:
+
+<Steps>
+  <Step title="Workspace → Database">
+    When `syncAgentsFromConfig()` runs (startup, manual sync), it reads `soul.md` from each agent's workspace and writes to the database:
+
+    ```typescript
+    // Read soul.md from workspace
+    const soul_content = readWorkspaceFile(agent.workspace, 'soul.md')
+
+    // Write to database
+    insertAgent.run(
+      mapped.name,
+      mapped.role,
+      soul_content, // Stored in agents.soul_content column
+      'offline',
+      now,
+      now,
+      configJson
+    )
+    ```
+  </Step>
+
+  <Step title="Database → Workspace">
+    When you edit SOUL content in the UI via `PUT /api/agents/[id]/soul`, it writes to both locations:
+
+    ```typescript
+    // Update database
+    db.prepare('UPDATE agents SET soul_content = ? WHERE id = ?')
+      .run(content, agentId)
+
+    // Write to workspace soul.md
+    const workspace = agent.config?.workspace
+    if (workspace) {
+      const soulPath = resolveWithin(workspace, 'soul.md')
+      await writeFile(soulPath, content, 'utf-8')
+    }
+    ```
+  </Step>
+
+  <Step title="Conflict Resolution">
+    When syncing from `openclaw.json`, the system only overwrites database content if:
+    - The workspace file has newer content
+    - The existing database value is null
+
+    ```typescript
+    const soulChanged = mapped.soul_content !== null && 
+                        mapped.soul_content !== existingSoul
+
+    if (soulChanged) {
+      const soulToWrite = mapped.soul_content ?? existingSoul
+      updateAgent.run(mapped.role, configJson, soulToWrite, now, mapped.name)
+    }
+    ```
+  </Step>
+</Steps>
+
+## Identity Parsing
+
+The system extracts structured metadata from markdown:
+
+<Tabs>
+  <Tab title="Parser Logic">
+    ```typescript
+    function parseIdentityFromFile(content: string): {
+      name?: string
+      theme?: string
+      emoji?: string
+      content?: string
+    } {
+      const lines = content.split('\n').map(line => line.trim())
+
+      let name: string | undefined
+      let theme: string | undefined
+      let emoji: string | undefined
+
+      for (const line of lines) {
+        // Extract name from first heading
+        if (!name && line.startsWith('#')) {
+          name = line.replace(/^#+\s*/, '').trim()
+          continue
+        }
+
+        // Extract theme: field
+        const themeMatch = line.match(/^theme\s*:\s*(.+)$/i)
+        if (themeMatch?.[1]) {
+          theme = themeMatch[1].trim()
+          continue
+        }
+
+        // Extract emoji: field
+        const emojiMatch = line.match(/^emoji\s*:\s*(.+)$/i)
+        if (emojiMatch?.[1]) {
+          emoji = emojiMatch[1].trim()
+        }
+      }
+
+      return { name, theme, emoji, content: lines.slice(0, 8).join('\n') }
+    }
+    ```
+  </Tab>
+
+  <Tab title="Example Input">
+    ```markdown
+    # Data Analyst
+
+    theme: data science specialist
+    emoji: 📊
+
+    ## Core Skills
+    - SQL and database design
+    - Statistical analysis
+    - Data visualization
+    ```
+  </Tab>
+
+  <Tab title="Parsed Output">
+    ```json
+    {
+      "name": "Data Analyst",
+      "theme": "data science specialist",
+      "emoji": "📊",
+      "content": "# Data Analyst\n\ntheme: data science specialist\nemoji: 📊\n\n## Core Skills\n- SQL and database design\n- Statistical analysis"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## API Reference
+
+### Get Agent SOUL
+
+<CodeGroup>
+```bash GET /api/agents/[id]/soul
+curl -X GET "http://localhost:3000/api/agents/123/soul" \
+  -H "x-api-key: YOUR_API_KEY"
+```
+
+```json Response
+{
+  "soul_content": "# Engineering Specialist\n\ntheme: engineering specialist\nemoji: 🔧\n\n## Core Capabilities\n...",
+  "source": "database"
+}
+```
+</CodeGroup>
+
+<Note>
+The API returns database content by default. To read directly from workspace, the system checks if the file exists and is readable.
+</Note>
+
+### Update Agent SOUL
+
+<CodeGroup>
+```bash PUT /api/agents/[id]/soul
+curl -X PUT "http://localhost:3000/api/agents/123/soul" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "soul_content": "# Updated SOUL\n\ntheme: updated theme\n..."
+  }'
+```
+
+```json Response
+{
+  "success": true,
+  "updated": {
+    "database": true,
+    "workspace": true
+  }
+}
+```
+</CodeGroup>
+
+### Sync from Config
+
+<CodeGroup>
+```bash POST /api/agents/sync
+curl -X POST "http://localhost:3000/api/agents/sync" \
+  -H "x-api-key: YOUR_API_KEY"
+```
+
+```json Response
+{
+  "synced": 5,
+  "created": 2,
+  "updated": 3,
+  "agents": [
+    { "id": "agent-1", "name": "Engineer", "action": "updated" },
+    { "id": "agent-2", "name": "Analyst", "action": "created" }
+  ]
+}
+```
+</CodeGroup>
+
+## Tools Configuration
+
+The system also syncs `TOOLS.md` from workspaces:
+
+<CodeGroup>
+```markdown TOOLS.md
+# Allowed Tools
+
+- `bash` - Execute shell commands
+- `read` - Read file contents
+- `write` - Write to files
+- `glob` - Search for files
+- `grep` - Search file contents
+```
+
+```typescript Parser
+function parseToolsFromFile(content: string): {
+  allow?: string[]
+  raw?: string
+} {
+  const parsedTools = new Set<string>()
+
+  for (const line of content.split('\n')) {
+    const cleaned = line.trim()
+    if (!cleaned || cleaned.startsWith('#')) continue
+
+    // Match list items: - `tool` or - tool
+    const listMatch = cleaned.match(/^[-*]\s+`?([^`]+?)`?\s*$/)
+    if (listMatch?.[1]) {
+      parsedTools.add(listMatch[1].trim())
+    }
+  }
+
+  return {
+    allow: [...parsedTools],
+    raw: content
+  }
+}
+```
+</CodeGroup>
+
+## Best Practices
+
+<Warning>
+**Security Note**: SOUL files may contain sensitive behavioral guidelines. Store them in version control with appropriate access controls.
+</Warning>
+
+<Tabs>
+  <Tab title="Structure">
+    - Use clear heading hierarchy (`#`, `##`, `###`)
+    - Place metadata fields (`theme:`, `emoji:`) near the top
+    - Keep SOUL content under 4KB for optimal performance
+    - Use consistent formatting across your agent fleet
+  </Tab>
+
+  <Tab title="Content">
+    - **Capabilities**: List specific skills and domains
+    - **Guidelines**: Define behavioral rules and constraints
+    - **Communication**: Specify tone, style, and response format
+    - **Context**: Include relevant background or specialization
+  </Tab>
+
+  <Tab title="Sync Workflow">
+    1. Edit `soul.md` locally in agent workspace
+    2. Run `POST /api/agents/sync` to pull changes into database
+    3. Or edit via UI—changes write to both locations
+    4. Use version control for workspace files
+    5. Run sync on deployment to ensure consistency
+  </Tab>
+</Tabs>
+
+## Troubleshooting
+
+<Steps>
+  <Step title="SOUL not syncing from workspace">
+    Check that:
+    - `OPENCLAW_HOME` environment variable is set correctly
+    - Agent's `workspace` field in `openclaw.json` is valid
+    - File path resolves correctly: `$OPENCLAW_HOME/[workspace]/soul.md`
+    - File has read permissions
+  </Step>
+
+  <Step title="UI changes not writing to workspace">
+    Verify:
+    - Agent has `workspace` field in database config
+    - Workspace directory exists and is writable
+    - No file system errors in Mission Control logs
+  </Step>
+
+  <Step title="Identity fields not parsing">
+    Ensure:
+    - Fields use exact format: `theme: value` (lowercase, space after colon)
+    - Name comes from first markdown heading (`# Name`)
+    - No extra whitespace or special characters
+  </Step>
+</Steps>
+
+## Related
+
+- [Agent Management](/features/agent-management) - Registering and managing agents
+- [API Reference](/api/agents) - Complete agent API documentation
+- [OpenClaw Gateway](/integrations/openclaw-gateway) - OpenClaw gateway integration

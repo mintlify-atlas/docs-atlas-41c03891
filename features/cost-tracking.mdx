@@ -1,0 +1,497 @@
+---
+title: Cost Tracking
+description: Monitor token usage and API costs with per-model breakdowns, trend charts, and optimization insights
+icon: dollar-sign
+---
+
+## Overview
+
+The Token & Cost Dashboard provides comprehensive visibility into LLM usage across your agent fleet. Track token consumption, calculate costs, identify optimization opportunities, and export data for analysis.
+
+<Note>
+Cost tracking requires agents to report token usage via the heartbeat API or gateway WebSocket events.
+</Note>
+
+## Accessing the Dashboard
+
+<Steps>
+  <Step title="Navigate to Tokens">
+    Click **Tokens** in the left navigation rail.
+  </Step>
+  <Step title="Select Timeframe">
+    Choose Hour, Day (default), Week, or Month in the header.
+  </Step>
+  <Step title="View Statistics">
+    Dashboard loads usage stats, trends, and cost breakdowns for the selected period.
+  </Step>
+</Steps>
+
+## Timeframe Selection
+
+Four timeframes available:
+
+<Tabs>
+  <Tab title="Hour">
+    Last 60 minutes of usage. Best for real-time monitoring during active development.
+  </Tab>
+  <Tab title="Day">
+    Last 24 hours. Default view. Ideal for daily budget tracking.
+  </Tab>
+  <Tab title="Week">
+    Last 7 days. Useful for weekly sprint analysis.
+  </Tab>
+  <Tab title="Month">
+    Last 30 days. Monthly cost forecasting and trend analysis.
+  </Tab>
+</Tabs>
+
+## Overview Statistics
+
+Four primary metrics displayed in the header cards:
+
+<CardGroup cols={2}>
+  <Card title="Total Tokens" icon="hashtag">
+    Aggregate token count (input + output) for the selected timeframe. Formatted with K/M suffixes (e.g., "2.5M").
+  </Card>
+  <Card title="Total Cost" icon="dollar-sign">
+    Estimated cost in USD based on model pricing. Precision to 4 decimal places (e.g., "$12.3456").
+  </Card>
+  <Card title="API Requests" icon="webhook">
+    Number of LLM API calls made during the period.
+  </Card>
+  <Card title="Avg Tokens/Request" icon="calculator">
+    Mean tokens per request. Useful for identifying verbose prompts.
+  </Card>
+</CardGroup>
+
+## Usage Trends Chart
+
+A 24-hour line chart showing:
+
+- **Tokens** (blue line) — Token consumption over time
+- **Requests** (green line) — Request volume over time
+
+### Chart Features
+
+- Responsive design (resizes with window)
+- Hover tooltips with exact values
+- Cartesian grid for easy reading
+- Time-based X-axis (2-minute intervals)
+- Formatted Y-axis (K/M suffixes)
+
+<Accordion title="Empty State">
+  If no trend data exists for the timeframe, the chart shows: "No trend data for this timeframe"
+</Accordion>
+
+## Model Usage Breakdown
+
+### Token Usage by Model (Bar Chart)
+
+Bar chart ranking models by total token consumption:
+
+- **X-axis** — Model names (rotated 45° for readability)
+- **Y-axis** — Total tokens (formatted)
+- **Sorted** — Descending by cost (most expensive first)
+
+### Cost Distribution (Pie Chart)
+
+Donut chart showing cost share by model:
+
+- **Top 6 models** displayed (others grouped if > 6)
+- **Color-coded** segments
+- **Hover tooltips** with exact cost
+- **Legend** with model names
+
+<Note>
+Model names are normalized for display. For example, `anthropic/claude-sonnet-4-20250514` becomes `sonnet-4`.
+</Note>
+
+## Performance Insights
+
+The insights panel highlights optimization opportunities:
+
+### Metrics Cards
+
+<CardGroup cols={3}>
+  <Card title="Most Efficient Model" icon="leaf">
+    Model with the lowest cost per 1K tokens. Displays rate in dollars per thousand tokens.
+  </Card>
+  <Card title="Most Used Model" icon="chart-bar">
+    Model with the highest request count. Shows total requests.
+  </Card>
+  <Card title="Optimization Potential" icon="piggy-bank">
+    Potential savings if all requests used the most efficient model. Shows amount and percentage.
+  </Card>
+</CardGroup>
+
+### Model Efficiency Comparison
+
+Horizontal bar chart comparing efficiency across all models:
+
+- **Bar width** — Relative efficiency (longer = more efficient)
+- **Cost rate** — Dollars per 1K tokens (displayed on right)
+- **Green bars** — All models use green for consistency
+
+<Accordion title="Efficiency Calculation">
+  ```
+  efficiency = 1 / (cost_per_token * 1000)
+  bar_width = (efficiency / max_efficiency) * 100%
+  ```
+  
+  Higher values mean lower cost per token (better efficiency).
+</Accordion>
+
+## Alerts & Suggestions
+
+Automated alerts appear when thresholds are exceeded:
+
+### Alert Types
+
+<Tabs>
+  <Tab title="High Usage Cost">
+    Triggered when total cost > $100 in the selected timeframe.
+    
+    **Message:** "Total cost of $XXX exceeds $100 threshold"
+    
+    **Suggestion:** "Consider using more cost-effective models for routine tasks"
+  </Tab>
+  <Tab title="Optimization Opportunity">
+    Triggered when potential savings > 20% by switching to most efficient model.
+    
+    **Message:** "Using [model] could save $XXX (XX.X%)"
+    
+    **Suggestion:** "Consider switching routine tasks to more efficient models"
+  </Tab>
+  <Tab title="High Request Volume">
+    Triggered when request count > 1000 in the selected timeframe.
+    
+    **Message:** "[count] requests in selected timeframe"
+    
+    **Suggestion:** "Consider implementing request batching or caching for efficiency"
+  </Tab>
+</Tabs>
+
+### Alert Styling
+
+- ⚠️ **Warning** — Yellow border and background
+- ℹ️ **Info** — Blue border and background
+
+## Detailed Statistics
+
+### Model Performance Table
+
+Scrollable list of all models with:
+
+- **Model name** (normalized)
+- **Total cost** (USD)
+- **Total tokens**
+- **Request count**
+- **Avg cost per request**
+- **Avg tokens per request**
+
+### Top Sessions by Cost
+
+Scrollable list of top 10 sessions with:
+
+- **Session ID** or key
+- **Active status** (Active/Inactive)
+- **Total cost**
+- **Total tokens**
+- **Request count**
+- **Avg cost per request**
+
+<Note>
+Sessions linked to agents show the agent name. Orphaned sessions show the raw session ID.
+</Note>
+
+## Data Export
+
+Export usage data for external analysis:
+
+### Export Formats
+
+<Tabs>
+  <Tab title="CSV">
+    Comma-separated values for spreadsheet analysis.
+    
+    **Includes:**
+    - Timestamp
+    - Model
+    - Session ID
+    - Input tokens
+    - Output tokens
+    - Total tokens
+    - Cost
+  </Tab>
+  <Tab title="JSON">
+    Structured data for programmatic processing.
+    
+    **Includes:**
+    - Full usage records
+    - Model statistics
+    - Session statistics
+    - Summary metadata
+  </Tab>
+</Tabs>
+
+### Exporting Data
+
+<Steps>
+  <Step title="Select Timeframe">
+    Choose the time period to export (Hour/Day/Week/Month).
+  </Step>
+  <Step title="Click Export">
+    Click **Export CSV** or **Export JSON** in the Export Data panel.
+  </Step>
+  <Step title="Download File">
+    File downloads automatically with filename format: `token-usage-{timeframe}-{date}.{format}`
+  </Step>
+</Steps>
+
+### Example Export Filenames
+
+- `token-usage-day-2026-03-04.csv`
+- `token-usage-week-2026-03-04.json`
+- `token-usage-month-2026-03-04.csv`
+
+## Token Usage API
+
+Query token data programmatically:
+
+### Get Usage Stats
+
+```bash
+curl "http://localhost:3000/api/tokens?action=stats&timeframe=day" \
+  -H "x-api-key: your-api-key"
+```
+
+**Response:**
+```json
+{
+  "summary": {
+    "totalTokens": 2500000,
+    "totalCost": 12.3456,
+    "requestCount": 847,
+    "avgTokensPerRequest": 2951,
+    "avgCostPerRequest": 0.0146
+  },
+  "models": {
+    "claude-sonnet-4": {
+      "totalTokens": 1800000,
+      "totalCost": 9.0000,
+      "requestCount": 650
+    },
+    "gpt-4o": {
+      "totalTokens": 700000,
+      "totalCost": 3.3456,
+      "requestCount": 197
+    }
+  },
+  "sessions": { ... },
+  "timeframe": "day",
+  "recordCount": 847
+}
+```
+
+### Get Trend Data
+
+```bash
+curl "http://localhost:3000/api/tokens?action=trends&timeframe=day" \
+  -H "x-api-key: your-api-key"
+```
+
+**Response:**
+```json
+{
+  "trends": [
+    {
+      "timestamp": "2026-03-04T10:00:00Z",
+      "tokens": 125000,
+      "cost": 0.625,
+      "requests": 42
+    },
+    {
+      "timestamp": "2026-03-04T10:02:00Z",
+      "tokens": 132000,
+      "cost": 0.660,
+      "requests": 45
+    }
+  ],
+  "timeframe": "day"
+}
+```
+
+### Export Data
+
+```bash
+curl "http://localhost:3000/api/tokens?action=export&timeframe=week&format=csv" \
+  -H "x-api-key: your-api-key" \
+  --output token-usage.csv
+```
+
+## Reporting Token Usage
+
+Agents report token usage via:
+
+### Heartbeat API
+
+```bash
+curl -X POST http://localhost:3000/api/agents/{id}/heartbeat \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "status": "idle",
+    "tokens": {
+      "model": "claude-sonnet-4-20250514",
+      "input": 1500,
+      "output": 800,
+      "cost": 0.0115
+    }
+  }'
+```
+
+### Gateway Events
+
+Gateway-connected agents automatically report token usage via WebSocket `token_usage` events:
+
+```json
+{
+  "type": "event",
+  "event": "token_usage",
+  "payload": {
+    "model": "claude-sonnet-4-20250514",
+    "sessionId": "clawd-researcher-01",
+    "inputTokens": 1500,
+    "outputTokens": 800,
+    "totalTokens": 2300,
+    "cost": 0.0115
+  }
+}
+```
+
+## Model Pricing
+
+Mission Control includes a pricing catalog for common models:
+
+<Accordion title="Anthropic Models">
+  - **claude-4.5-sonnet** — $3/M input, $15/M output
+  - **claude-sonnet-4** — $3/M input, $15/M output
+  - **claude-3.5-haiku** — $1/M input, $5/M output
+</Accordion>
+
+<Accordion title="OpenAI Models">
+  - **gpt-4o** — $2.50/M input, $10/M output
+  - **gpt-4o-mini** — $0.15/M input, $0.60/M output
+  - **o1** — $15/M input, $60/M output
+</Accordion>
+
+<Accordion title="Custom Models">
+  For unlisted models, cost is estimated at $0 unless provided explicitly in token reports.
+</Accordion>
+
+<Note>
+Pricing is managed in `src/lib/models.ts`. Add custom models by updating the catalog.
+</Note>
+
+## Claude Code Session Tracking
+
+Mission Control auto-discovers local Claude Code sessions:
+
+### Automatic Scanning
+
+The scheduler scans `~/.claude/projects/` every 60 seconds:
+
+1. Reads JSONL transcript files
+2. Extracts token usage from API responses
+3. Calculates costs using Claude pricing
+4. Stores in database with `source = 'claude-code'`
+
+### Viewing Claude Sessions
+
+```bash
+curl "http://localhost:3000/api/claude/sessions?active=1" \
+  -H "x-api-key: your-api-key"
+```
+
+**Response:**
+```json
+{
+  "sessions": [
+    {
+      "project": "mission-control",
+      "model": "claude-sonnet-4",
+      "messageCount": 23,
+      "totalTokens": 45000,
+      "cost": 0.225,
+      "active": true,
+      "lastActivity": 1735696800000
+    }
+  ]
+}
+```
+
+<Warning>
+Claude Code session tracking requires `MC_CLAUDE_HOME` to be set in `.env`. Default: `~/.claude`
+</Warning>
+
+## Optimization Strategies
+
+### Model Selection
+
+Choose models based on task complexity:
+
+- **Routine tasks** — Use Haiku or GPT-4o-mini for simple operations
+- **Complex reasoning** — Use Sonnet-4 or GPT-4o for difficult problems
+- **Code generation** — Use Sonnet-4 for high-quality code output
+- **Research** — Use Sonnet-4 or o1 for deep analysis
+
+### Prompt Engineering
+
+Reduce token usage:
+
+- **Concise prompts** — Remove unnecessary context
+- **Structured output** — Request JSON instead of prose
+- **Few-shot examples** — Use 1-2 examples instead of 5+
+- **Streaming** — Stop generation early when answer is sufficient
+
+### Caching
+
+Implement caching for repeated requests:
+
+- Cache embeddings for semantic search
+- Cache API responses for identical prompts
+- Use model caching features (e.g., Claude prompt caching)
+
+## Troubleshooting
+
+<Accordion title="No Usage Data Showing">
+  1. Verify agents are reporting token usage via heartbeat API
+  2. Check `tokens.json` file exists in `.data/` directory
+  3. Confirm selected timeframe includes activity
+  4. Try clicking **Refresh** in the dashboard
+</Accordion>
+
+<Accordion title="Costs Seem Incorrect">
+  1. Check model pricing in `src/lib/models.ts`
+  2. Verify token counts in raw data (export JSON)
+  3. Confirm model names are normalized correctly
+  4. Review agent heartbeat payloads for cost field
+</Accordion>
+
+<Accordion title="Charts Not Loading">
+  1. Check browser console for errors
+  2. Verify Recharts library is installed: `pnpm list recharts`
+  3. Try clearing browser cache
+  4. Test API endpoint directly: `curl /api/tokens?action=trends`
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Background Automation" icon="clock" href="/features/background-automation">
+    Configure automated cleanup and retention policies
+  </Card>
+  <Card title="Agent Management" icon="robot" href="/features/agent-management">
+    Monitor which agents are consuming the most resources
+  </Card>
+</CardGroup>

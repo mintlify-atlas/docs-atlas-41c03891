@@ -1,0 +1,468 @@
+---
+title: Security Best Practices
+description: Authentication, authorization, TLS, and network security for Mission Control
+---
+
+Mission Control implements multiple layers of security to protect sensitive agent orchestration data, API keys, and user credentials. This guide covers authentication methods, role-based access control (RBAC), network security, and deployment best practices.
+
+## Authentication
+
+Mission Control supports multiple authentication methods:
+
+### Session-Based Authentication
+
+The primary authentication method uses secure HTTP-only cookies with cryptographically random session tokens.
+
+**Login flow:**
+
+1. User submits credentials to `/api/auth/login`
+2. Server validates credentials using constant-time comparison (timing attack prevention)
+3. On success, creates session token (32-byte random hex) with 7-day expiration
+4. Returns `mc-session` cookie with `httpOnly`, `secure` (in production), and `sameSite=strict` flags
+5. Subsequent requests include session cookie for authentication
+
+**Session security features (src/lib/auth.ts:104-121):**
+
+```typescript
+const SESSION_DURATION = 7 * 24 * 60 * 60 // 7 days
+const token = randomBytes(32).toString('hex')
+```
+
+- **Cryptographic randomness:** Uses Node.js `crypto.randomBytes(32)` for unpredictable tokens
+- **Automatic expiration:** Sessions expire after 7 days
+- **Cleanup:** Expired sessions are purged on new session creation
+- **IP & User-Agent tracking:** Sessions log IP address and user agent for audit trails
+
+### API Key Authentication
+
+For headless/programmatic access, use API key authentication:
+
+```bash
+curl -H "x-api-key: your-api-key" https://mc.example.com/api/...
+```
+
+**Security implementation (src/proxy.ts:100-106):**
+
+```typescript
+const apiKey = request.headers.get('x-api-key')
+if (apiKey && safeCompare(apiKey, process.env.API_KEY || '')) {
+  return applySecurityHeaders(NextResponse.next())
+}
+```
+
+- **Constant-time comparison:** Uses `crypto.timingSafeEqual()` to prevent timing attacks
+- **Admin privileges:** API key grants full admin access (synthetic user with `role: 'admin'`)
+- **Single key:** One API key per instance (rotate regularly)
+
+<Warning>
+  Generate a strong API key with high entropy:
+  
+  ```bash
+  openssl rand -hex 32
+  ```
+  
+  Never commit `API_KEY` to version control.
+</Warning>
+
+### Google OAuth (Optional)
+
+Mission Control supports Google Sign-In with approval workflow:
+
+1. User clicks "Sign in with Google"
+2. Google OAuth flow validates user identity
+3. **Admin approval required:** New Google users are created with `is_approved=0`
+4. Admin approves user via UI or API
+5. User can then access the dashboard
+
+**Configuration:**
+
+```bash
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+```
+
+Create OAuth credentials in [Google Cloud Console](https://console.cloud.google.com/) and configure authorized origins/redirect URIs.
+
+## Role-Based Access Control (RBAC)
+
+Mission Control implements a three-tier role hierarchy:
+
+| Role | Level | Permissions |
+|------|-------|-------------|
+| **viewer** | 0 | Read-only access to dashboards, logs, and metrics |
+| **operator** | 1 | Viewer permissions + trigger pipelines, manage agents, modify configurations |
+| **admin** | 2 | Operator permissions + user management, system settings, API key access |
+
+**Role enforcement (src/lib/auth.ts:300-319):**
+
+```typescript
+const ROLE_LEVELS: Record<string, number> = { viewer: 0, operator: 1, admin: 2 }
+
+export function requireRole(
+  request: Request,
+  minRole: User['role']
+): { user: User } | { error: string; status: 401 | 403 } {
+  const user = getUserFromRequest(request)
+  if (!user) {
+    return { error: 'Authentication required', status: 401 }
+  }
+  if ((ROLE_LEVELS[user.role] ?? -1) < ROLE_LEVELS[minRole]) {
+    return { error: `Requires ${minRole} role or higher`, status: 403 }
+  }
+  return { user }
+}
+```
+
+API routes use `requireRole()` to enforce minimum role requirements:
+
+```typescript
+// Example: /api/users (admin only)
+const auth = requireRole(request, 'admin')
+if ('error' in auth) {
+  return NextResponse.json({ error: auth.error }, { status: auth.status })
+}
+const user = auth.user
+```
+
+### Managing Users
+
+Admins can manage users via the UI or API:
+
+<CodeGroup>
+```bash Create User (API)
+curl -X POST https://mc.example.com/api/users \
+  -H "x-api-key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "operator1",
+    "password": "strong-password-min-12-chars",
+    "display_name": "Operator One",
+    "role": "operator"
+  }'
+```
+
+```bash Update User Role
+curl -X PATCH https://mc.example.com/api/users/2 \
+  -H "x-api-key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "admin"}'
+```
+
+```bash Delete User
+curl -X DELETE https://mc.example.com/api/users/2 \
+  -H "x-api-key: your-api-key"
+```
+</CodeGroup>
+
+<Note>
+  Password minimum length: **12 characters** (enforced in src/lib/auth.ts:208)
+</Note>
+
+## Network Access Control
+
+Mission Control implements **default-deny host-based access control** in production environments.
+
+### How It Works (src/proxy.ts:56-70)
+
+```typescript
+const hostName = getRequestHostname(request) // From x-forwarded-host or host header
+const allowAnyHost = envFlag('MC_ALLOW_ANY_HOST') || process.env.NODE_ENV !== 'production'
+const allowedPatterns = String(process.env.MC_ALLOWED_HOSTS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean)
+
+const isAllowedHost = allowAnyHost || allowedPatterns.some((p) => hostMatches(p, hostName))
+
+if (!isAllowedHost) {
+  return new NextResponse('Forbidden', { status: 403 })
+}
+```
+
+**Behavior:**
+
+- **Development (`NODE_ENV !== 'production'`):** All hosts allowed by default
+- **Production (`NODE_ENV === 'production'`):** Only hosts matching `MC_ALLOWED_HOSTS` patterns are allowed
+- **Override:** Set `MC_ALLOW_ANY_HOST=true` to disable (not recommended in production)
+
+### Allowed Host Patterns
+
+Supports flexible pattern matching (src/proxy.ts:28-46):
+
+| Pattern | Example | Matches | Does NOT Match |
+|---------|---------|---------|----------------|
+| **Exact host** | `app.example.com` | `app.example.com` | `api.example.com`, `app.example.com:8080` |
+| **Subdomain wildcard** | `*.example.com` | `api.example.com`, `app.example.com` | `example.com` (bare domain) |
+| **Prefix wildcard** | `100.*` | `100.64.0.1`, `100.100.100.100` | `10.0.0.1` |
+
+**Example configuration:**
+
+```bash
+MC_ALLOWED_HOSTS=localhost,127.0.0.1,mc.example.com,*.internal.example.com,100.*
+```
+
+This allows:
+- `localhost` and `127.0.0.1` (local development/testing)
+- `mc.example.com` (production domain)
+- `api.internal.example.com`, `dashboard.internal.example.com` (internal subdomains)
+- `100.64.0.1`, `100.100.100.100` (Tailscale IP range)
+
+<Warning>
+  **Always configure `MC_ALLOWED_HOSTS` in production** to prevent unauthorized access from spoofed Host headers.
+  
+  Never set `MC_ALLOW_ANY_HOST=true` in production unless absolutely necessary.
+</Warning>
+
+## CSRF Protection
+
+Mission Control validates the `Origin` header for state-changing requests (src/proxy.ts:74-88):
+
+```typescript
+const method = request.method.toUpperCase()
+if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
+  const origin = request.headers.get('origin')
+  if (origin) {
+    const originHost = new URL(origin).host
+    const requestHost = request.headers.get('host')?.split(',')[0]?.trim()
+    if (originHost && requestHost && originHost !== requestHost) {
+      return NextResponse.json({ error: 'CSRF origin mismatch' }, { status: 403 })
+    }
+  }
+}
+```
+
+**Protection:**
+- Validates `Origin` header matches `Host` header for POST/PUT/DELETE/PATCH requests
+- Prevents cross-site request forgery attacks
+- Works automatically with modern browsers
+
+## Security Headers
+
+All responses include security headers (src/proxy.ts:48-53):
+
+```typescript
+function applySecurityHeaders(response: NextResponse): NextResponse {
+  response.headers.set('X-Content-Type-Options', 'nosniff')
+  response.headers.set('X-Frame-Options', 'DENY')
+  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
+  return response
+}
+```
+
+| Header | Value | Purpose |
+|--------|-------|----------|
+| `X-Content-Type-Options` | `nosniff` | Prevent MIME type sniffing attacks |
+| `X-Frame-Options` | `DENY` | Prevent clickjacking (no iframe embedding) |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | Limit referrer information leakage |
+
+**Recommended reverse proxy headers (add via Nginx/Caddy):**
+
+```nginx
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';" always;
+```
+
+## TLS / HTTPS
+
+<Warning>
+  **Always deploy Mission Control behind a reverse proxy with TLS in production.**
+  
+  Never expose the Node.js server directly to the internet.
+</Warning>
+
+### Enable Secure Cookies
+
+When serving over HTTPS, enable secure cookies:
+
+```bash
+MC_COOKIE_SECURE=true
+```
+
+This sets the `Secure` flag on session cookies, preventing transmission over unencrypted HTTP.
+
+**Default behavior:**
+- Production (`NODE_ENV=production`): `secure=true` unless explicitly set to `false`
+- Development: `secure=false` (allows testing over HTTP)
+
+### Reverse Proxy TLS Termination
+
+See [Production Deployment - Reverse Proxy Configuration](/deployment/production#reverse-proxy-configuration) for Nginx/Caddy/Traefik examples with:
+
+- TLS 1.2/1.3 only
+- Strong cipher suites
+- HSTS (Strict-Transport-Security)
+- HTTP to HTTPS redirect
+
+## Password Security
+
+Mission Control uses industry-standard password hashing:
+
+- **Algorithm:** Argon2id (via `@node-rs/argon2` or fallback to bcrypt)
+- **Verification:** Constant-time comparison to prevent timing attacks
+- **Minimum length:** 12 characters (enforced at user creation)
+
+**Password with special characters:**
+
+If `AUTH_PASS` contains `#`, use one of these methods:
+
+```bash
+# Method 1: Quote the value
+AUTH_PASS="my#password"
+
+# Method 2: Base64 encoding
+AUTH_PASS_B64=$(echo -n 'my#password' | base64)
+```
+
+## Secrets Management
+
+<Warning>
+  **Never commit `.env` files to version control.**
+  
+  The repository `.gitignore` already excludes these files:
+  - `.env`
+  - `.env.local`
+  - `.env.production`
+</Warning>
+
+### Best Practices
+
+1. **Use environment-specific files:**
+   - Development: `.env.local`
+   - Production: `.env` or secret management service
+
+2. **Rotate credentials regularly:**
+   ```bash
+   # Generate new API key
+   openssl rand -hex 32
+   
+   # Update AUTH_PASS for admin
+   openssl rand -base64 32
+   ```
+
+3. **Use secret management services:**
+   - Docker Swarm: Docker Secrets
+   - Kubernetes: Sealed Secrets or External Secrets Operator
+   - Cloud: AWS Secrets Manager, Azure Key Vault, Google Secret Manager
+
+4. **Restrict file permissions:**
+   ```bash
+   chmod 600 /opt/mission-control/.env
+   chown mission-control:mission-control /opt/mission-control/.env
+   ```
+
+### 1Password Integration
+
+Mission Control supports pulling secrets from 1Password CLI:
+
+```bash
+OP_VAULT_NAME=production
+```
+
+The Integrations panel can fetch secrets from the specified vault.
+
+## Gateway Security
+
+### Device Identity & WebCrypto
+
+Mission Control uses WebCrypto for device identity signing when connecting to gateways:
+
+<Note>
+  **Device identity requires a secure context (HTTPS or localhost).**
+  
+  If you see "Gateway error: device identity required", ensure Mission Control is served over HTTPS.
+</Note>
+
+### Gateway Origin Allowlist
+
+Configure your OpenClaw gateway to allow Mission Control origins:
+
+```json openclaw.json
+{
+  "gateway": {
+    "controlUi": {
+      "allowedOrigins": ["https://mc.example.com"]
+    }
+  }
+}
+```
+
+Restart the gateway after updating the configuration.
+
+## Audit Logging
+
+Mission Control logs security-relevant events:
+
+- **User authentication:** Login attempts, session creation/destruction
+- **User management:** User creation, role changes, deletions
+- **API access:** API key usage with IP address and user agent
+- **Configuration changes:** System settings modifications
+
+**Retention:**
+
+```bash
+MC_RETAIN_AUDIT_DAYS=365  # Keep audit logs for 1 year
+```
+
+See [Environment Variables - Data Retention](/deployment/environment-variables#data-retention).
+
+## Security Checklist
+
+<Steps>
+  <Step title="Authentication">
+    - [ ] Set strong `AUTH_PASS` (min 12 characters, high entropy)
+    - [ ] Generate secure `API_KEY` with `openssl rand -hex 32`
+    - [ ] Rotate credentials on initial deployment
+    - [ ] Enable Google OAuth approval workflow if using SSO
+  </Step>
+  
+  <Step title="Network Security">
+    - [ ] Configure `MC_ALLOWED_HOSTS` to restrict access
+    - [ ] Deploy behind reverse proxy (Nginx/Caddy)
+    - [ ] Enable TLS with valid certificates (Let's Encrypt)
+    - [ ] Set `MC_COOKIE_SECURE=true` for HTTPS
+    - [ ] Configure firewall to allow only necessary ports
+  </Step>
+  
+  <Step title="Access Control">
+    - [ ] Assign users appropriate roles (viewer/operator/admin)
+    - [ ] Regularly review user list and remove inactive accounts
+    - [ ] Use API key only for automation (not humans)
+    - [ ] Enable 2FA for admin accounts (if using Google OAuth)
+  </Step>
+  
+  <Step title="Data Protection">
+    - [ ] Restrict `.env` file permissions (`chmod 600`)
+    - [ ] Keep `.env` out of version control
+    - [ ] Use secret management service in production
+    - [ ] Configure audit log retention (`MC_RETAIN_AUDIT_DAYS=365`)
+  </Step>
+  
+  <Step title="Monitoring">
+    - [ ] Monitor authentication failures
+    - [ ] Alert on unauthorized access attempts (403 errors)
+    - [ ] Review audit logs regularly
+    - [ ] Track API key usage patterns
+  </Step>
+</Steps>
+
+## Reporting Vulnerabilities
+
+If you discover a security vulnerability in Mission Control:
+
+<Warning>
+  **Do not open a public issue.**
+  
+  Email security@builderz.dev with:
+  - Description of the vulnerability
+  - Steps to reproduce
+  - Potential impact
+  - Suggested fix (if any)
+  
+  We will acknowledge receipt within 48 hours and aim to provide a fix within 7 days for critical issues.
+</Warning>
+
+## Additional Resources
+
+- [Environment Variables](/deployment/environment-variables) - Complete configuration reference
+- [Docker Deployment](/deployment/docker) - Container security best practices
+- [Production Deployment](/deployment/production) - Infrastructure hardening

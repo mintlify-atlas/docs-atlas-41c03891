@@ -1,0 +1,458 @@
+---
+title: 'Sessions API'
+description: 'Monitor and control AI agent gateway sessions'
+icon: 'network-wired'
+---
+
+## Overview
+
+The Sessions API provides visibility into active gateway sessions where agents are connected and processing work. Sessions track token usage, model selection, activity timestamps, and connection status.
+
+Mission Control aggregates session data from:
+- **OpenClaw Gateway**: Primary source for active agent sessions
+- **Claude Code**: Local Claude development sessions
+- **Token Usage Database**: Historical session data
+
+## Authentication
+
+All session endpoints require authentication via:
+- **Session Cookie**: `mc-session` (set after login)
+- **API Key**: `x-api-key` header
+
+Minimum role: **Viewer**
+
+---
+
+## List Gateway Sessions
+
+<Card title="GET /api/sessions" icon="list">
+Retrieve all active gateway sessions with token usage and status information.
+</Card>
+
+**Authorization:** Viewer role required
+
+### Query Parameters
+
+<ParamField query="agent" type="string">
+  Filter sessions by agent name
+</ParamField>
+
+<ParamField query="limit" type="integer" default="50">
+  Maximum number of sessions to return
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="sessions" type="array">
+  Array of session objects
+  <Expandable title="Session Object">
+    <ResponseField name="id" type="string">
+      Unique session identifier (format: `agent:key` or `sessionId`)
+    </ResponseField>
+    <ResponseField name="key" type="string">
+      Session key from gateway
+    </ResponseField>
+    <ResponseField name="agent" type="string">
+      Agent name associated with this session
+    </ResponseField>
+    <ResponseField name="kind" type="string">
+      Session type (e.g., "claude-code", chat type from gateway)
+    </ResponseField>
+    <ResponseField name="age" type="string">
+      Human-readable age (e.g., "2h", "15m", "3d")
+    </ResponseField>
+    <ResponseField name="model" type="string">
+      LLM model being used (e.g., "claude-sonnet-4", "gpt-4")
+    </ResponseField>
+    <ResponseField name="tokens" type="string">
+      Token usage formatted as "used/context (percentage%)" (e.g., "12k/35k (34%)")
+    </ResponseField>
+    <ResponseField name="channel" type="string">
+      Communication channel (e.g., "discord", "slack", "local")
+    </ResponseField>
+    <ResponseField name="flags" type="array">
+      Additional flags or metadata (e.g., git branch)
+    </ResponseField>
+    <ResponseField name="active" type="boolean">
+      Whether session is currently active
+    </ResponseField>
+    <ResponseField name="startTime" type="integer">
+      Unix timestamp when session started
+    </ResponseField>
+    <ResponseField name="lastActivity" type="integer">
+      Unix timestamp of last activity
+    </ResponseField>
+    <ResponseField name="source" type="string">
+      Data source: "gateway" or "local"
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Gateway Session Fields (when source = "gateway")
+
+When sessions are retrieved from the OpenClaw Gateway, they include:
+- Live token usage and context window information
+- Real-time activity status
+- Channel information (Discord, Slack, etc.)
+- Session type (chat, cron, etc.)
+
+### Local Session Fields (when source = "local")
+
+When sessions are retrieved from local Claude Code database:
+
+<ResponseField name="userMessages" type="integer">
+  Number of user messages in session
+</ResponseField>
+
+<ResponseField name="assistantMessages" type="integer">
+  Number of assistant responses
+</ResponseField>
+
+<ResponseField name="toolUses" type="integer">
+  Number of tool invocations
+</ResponseField>
+
+<ResponseField name="estimatedCost" type="number">
+  Estimated cost in USD
+</ResponseField>
+
+<ResponseField name="lastUserPrompt" type="string">
+  Most recent user prompt text
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://your-domain.com/api/sessions?agent=code-reviewer&limit=20" \
+  -H "x-api-key: your-api-key"
+```
+
+```javascript JavaScript
+const response = await fetch('/api/sessions?agent=code-reviewer&limit=20', {
+  headers: {
+    'x-api-key': 'your-api-key'
+  }
+});
+const data = await response.json();
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'https://your-domain.com/api/sessions',
+    params={'agent': 'code-reviewer', 'limit': 20},
+    headers={'x-api-key': 'your-api-key'}
+)
+sessions = response.json()
+```
+</CodeGroup>
+
+### Example Response (Gateway Sessions)
+
+```json
+{
+  "sessions": [
+    {
+      "id": "code-reviewer:session-abc123",
+      "key": "session-abc123",
+      "agent": "code-reviewer",
+      "kind": "chat",
+      "age": "2h",
+      "model": "claude-sonnet-4",
+      "tokens": "12k/35k (34%)",
+      "channel": "discord",
+      "flags": [],
+      "active": true,
+      "startTime": 1709848800,
+      "lastActivity": 1709856000,
+      "source": "gateway"
+    },
+    {
+      "id": "task-manager:session-def456",
+      "key": "session-def456",
+      "agent": "task-manager",
+      "kind": "cron",
+      "age": "15m",
+      "model": "claude-3-5-haiku",
+      "tokens": "3k/35k (9%)",
+      "channel": "internal",
+      "flags": [],
+      "active": true,
+      "startTime": 1709855100,
+      "lastActivity": 1709856000,
+      "source": "gateway"
+    }
+  ]
+}
+```
+
+### Example Response (Local Claude Sessions)
+
+```json
+{
+  "sessions": [
+    {
+      "id": "claude-abc-def-123",
+      "key": "mission-control",
+      "agent": "mission-control",
+      "kind": "claude-code",
+      "age": "1h",
+      "model": "claude-sonnet-4",
+      "tokens": "45k/82k",
+      "channel": "local",
+      "flags": ["main"],
+      "active": true,
+      "startTime": 1709852400,
+      "lastActivity": 1709856000,
+      "source": "local",
+      "userMessages": 12,
+      "assistantMessages": 12,
+      "toolUses": 35,
+      "estimatedCost": 0.42,
+      "lastUserPrompt": "Create API documentation pages"
+    }
+  ]
+}
+```
+
+<Note>
+**Session Deduplication**
+
+OpenClaw tracks cron runs under the same session ID as parent sessions. Mission Control automatically deduplicates by `sessionId`, keeping the most recently updated entry when duplicates exist.
+</Note>
+
+### Error Responses
+
+<ResponseField name="401 Unauthorized">
+  Authentication required or invalid credentials
+</ResponseField>
+
+---
+
+## Control Session
+
+<Card title="POST /api/sessions/{id}/control" icon="sliders">
+Control a session with pause, resume, or kill actions.
+</Card>
+
+**Authorization:** Operator role required
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  Session ID (key)
+</ParamField>
+
+### Request Body
+
+<ParamField body="action" type="string" required>
+  Control action to perform
+  <Expandable title="Allowed values">
+    - `pause` - Temporarily suspend session execution
+    - `resume` - Resume a paused session
+    - `kill` - Terminate session immediately
+  </Expandable>
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Whether the control action was successful
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+```bash cURL - Pause
+curl -X POST "https://your-domain.com/api/sessions/session-abc123/control" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "action": "pause"
+  }'
+```
+
+```bash cURL - Kill
+curl -X POST "https://your-domain.com/api/sessions/session-abc123/control" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "action": "kill"
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('/api/sessions/session-abc123/control', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'x-api-key': 'your-api-key'
+  },
+  body: JSON.stringify({
+    action: 'pause'
+  })
+});
+const data = await response.json();
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    'https://your-domain.com/api/sessions/session-abc123/control',
+    json={'action': 'kill'},
+    headers={'x-api-key': 'your-api-key'}
+)
+result = response.json()
+```
+</CodeGroup>
+
+### Example Response
+
+```json
+{
+  "success": true
+}
+```
+
+### Error Responses
+
+<ResponseField name="400 Bad Request">
+  Invalid action or missing required fields
+</ResponseField>
+
+<ResponseField name="401 Unauthorized">
+  Authentication required
+</ResponseField>
+
+<ResponseField name="403 Forbidden">
+  Insufficient permissions (requires operator role)
+</ResponseField>
+
+<ResponseField name="404 Not Found">
+  Session does not exist or has expired
+</ResponseField>
+
+---
+
+## Session Data Sources
+
+<Card title="Understanding Session Data" icon="database">
+Mission Control aggregates session data from multiple sources.
+</Card>
+
+### Priority Order
+
+1. **OpenClaw Gateway Sessions** (Primary)
+   - Live sessions from connected agents
+   - Real-time token usage and status
+   - Most up-to-date information
+
+2. **Claude Code Local Sessions** (Fallback)
+   - Local development sessions
+   - Historical data from SQLite database
+   - Used when no gateway sessions available
+
+3. **Token Usage Database** (Final Fallback)
+   - Derived from recorded token usage
+   - Used when no active sessions exist
+
+### Session Types
+
+<Tabs>
+  <Tab title="Gateway Sessions">
+    **Gateway Sessions** are live connections between agents and the OpenClaw gateway.
+    
+    **Characteristics:**
+    - Real-time status updates
+    - Active token counting
+    - Channel information (Discord, Slack, etc.)
+    - Support for control actions (pause/resume/kill)
+    
+    **Common Types:**
+    - `chat` - Interactive chat sessions
+    - `cron` - Scheduled task executions
+    - `webhook` - Webhook-triggered sessions
+  </Tab>
+  
+  <Tab title="Local Sessions">
+    **Local Sessions** are Claude Code development sessions running on the local machine.
+    
+    **Characteristics:**
+    - Read from Claude Code SQLite database
+    - Historical activity tracking
+    - Tool usage statistics
+    - Cost estimation
+    - Last user prompt tracking
+    
+    **Database Location:**
+    - macOS: `~/Library/Application Support/Claude/claude_desktop_config.sqlite`
+    - Linux: `~/.config/Claude/claude_desktop_config.sqlite`
+  </Tab>
+</Tabs>
+
+---
+
+## Token Usage Formatting
+
+<Card title="Understanding Token Display" icon="calculator">
+How token counts are formatted in session responses.
+</Card>
+
+### Format: `used/context (percentage%)`
+
+**Example:** `12k/35k (34%)`
+- **12k**: Tokens used in this session
+- **35k**: Total context window size
+- **34%**: Percentage of context consumed
+
+### Token Abbreviations
+
+- Numbers ≥ 1,000,000: `1.5m` (millions)
+- Numbers ≥ 1,000: `15k` (thousands)
+- Numbers < 1,000: `850` (exact count)
+
+---
+
+## Age Formatting
+
+<Card title="Session Age Display" icon="clock">
+How session age is calculated and displayed.
+</Card>
+
+Age is calculated from the last activity timestamp:
+
+- **Minutes**: `15m` (less than 1 hour)
+- **Hours**: `2h` (less than 24 hours)
+- **Days**: `3d` (24 hours or more)
+
+---
+
+## Monitoring Best Practices
+
+<Card title="Session Monitoring Tips" icon="lightbulb">
+Recommendations for effective session monitoring.
+</Card>
+
+### Active Monitoring
+
+1. **Check session age regularly** - Sessions older than 24h may be stale
+2. **Monitor token usage** - High percentages indicate context window pressure
+3. **Track inactive sessions** - `active: false` sessions may need cleanup
+4. **Review failed sessions** - Check for error patterns
+
+### Control Actions
+
+<Warning>
+**Use Kill with Caution**
+
+The `kill` action terminates a session immediately. This may interrupt agent work in progress. Use `pause` first for graceful suspension.
+</Warning>
+
+### Performance Considerations
+
+- Gateway sessions update in real-time
+- Local sessions refresh on database sync (typically every 5 minutes)
+- Token usage data is deduplicated to prevent duplicates from cron runs

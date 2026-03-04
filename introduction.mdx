@@ -1,0 +1,119 @@
+---
+title: Introduction
+description: Mission Control is an open-source dashboard for AI agent orchestration. Manage agent fleets, track tasks, monitor costs, and orchestrate workflows from a single pane of glass.
+---
+
+## What is Mission Control?
+
+Mission Control is the **open-source dashboard for AI agent orchestration**. It provides a centralized command center to manage agent fleets, track tasks, monitor costs, and orchestrate complex multi-agent workflows.
+
+<Info>
+Mission Control is alpha software under active development. APIs, database schemas, and configuration formats may change between releases. Review the security considerations before deploying to production.
+</Info>
+
+## Why Mission Control?
+
+Running AI agents at scale means juggling sessions, tasks, costs, and reliability across multiple models and channels. Mission Control solves this with:
+
+<CardGroup cols={2}>
+  <Card title="28 Specialized Panels" icon="grid">
+    Tasks, agents, logs, tokens, memory, cron, alerts, webhooks, pipelines, and more
+  </Card>
+  <Card title="Real-time Everything" icon="bolt">
+    WebSocket + SSE push updates with smart polling that pauses when you're away
+  </Card>
+  <Card title="Zero External Dependencies" icon="database">
+    SQLite database with WAL mode. No Redis, Postgres, or Docker required
+  </Card>
+  <Card title="Role-based Access" icon="shield">
+    Viewer, operator, and admin roles with session + API key authentication
+  </Card>
+  <Card title="Quality Gates" icon="check">
+    Built-in review system that blocks task completion without sign-off
+  </Card>
+  <Card title="Multi-gateway Support" icon="network-wired">
+    Connect to multiple agent gateways simultaneously (OpenClaw and more coming soon)
+  </Card>
+</CardGroup>
+
+## Core Features
+
+### Agent Management
+Monitor agent status, spawn new sessions, view heartbeats, and manage the full agent lifecycle from registration to retirement. Track agent health with automatic heartbeat monitoring.
+
+### Kanban Task Board
+Full-featured task board with six workflow columns (inbox → backlog → todo → in-progress → review → done). Includes drag-and-drop, priority levels, assignments, and threaded comments.
+
+### Real-time Monitoring
+Live activity feed, session inspector, and log viewer with filtering. WebSocket connection to gateway for instant event delivery with automatic reconnection.
+
+### Cost Tracking
+Token usage dashboard with per-model breakdowns, trend charts, and cost analysis. Track spending across Claude, GPT, and other models with automatic price updates.
+
+### Direct CLI Integration
+Connect Claude Code, Codex, or any CLI tool directly to Mission Control without requiring a gateway. Auto-register agents and report token usage inline with heartbeats.
+
+### Agent SOUL System
+Define agent personality, capabilities, and behavioral guidelines via SOUL markdown files. Edit in the UI or directly in workspace files—changes sync bidirectionally.
+
+### Claude Code Session Tracking
+Automatically discovers and tracks local Claude Code sessions from `~/.claude/projects/`. Extracts token usage, model info, and cost estimates from JSONL transcripts.
+
+## Architecture Overview
+
+Mission Control is built with modern web technologies optimized for performance and developer experience:
+
+| Layer | Technology |
+|-------|------------|
+| Framework | Next.js 16 (App Router) |
+| UI | React 19, Tailwind CSS 3.4 |
+| Language | TypeScript 5.7 |
+| Database | SQLite via better-sqlite3 (WAL mode) |
+| State | Zustand 5 |
+| Charts | Recharts 3 |
+| Real-time | WebSocket + Server-Sent Events |
+| Auth | scrypt hashing, session tokens, RBAC |
+| Validation | Zod 4 |
+| Testing | Vitest + Playwright (148 E2E tests) |
+
+## Authentication & Authorization
+
+Mission Control supports three authentication methods:
+
+- **Session cookie** — Web dashboard login with 7-day expiry
+- **API key** — Headless access via `x-api-key` header
+- **Google Sign-In** — OAuth with admin approval workflow
+
+Three role levels control access:
+
+- **Viewer** — Read-only access to all panels
+- **Operator** — Read + write (tasks, agents, chat)
+- **Admin** — Full access (users, settings, system operations)
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Multi-Agent Coordination" icon="users">
+    Orchestrate teams of agents working together on complex projects with task assignment and inter-agent messaging
+  </Card>
+  <Card title="Development Teams" icon="code">
+    Track Claude Code sessions, monitor token usage, and manage coding agents from a single dashboard
+  </Card>
+  <Card title="Production Monitoring" icon="chart-line">
+    Real-time visibility into agent health, performance metrics, and cost tracking for production deployments
+  </Card>
+  <Card title="Quality Assurance" icon="clipboard-check">
+    Review gates ensure agent output meets quality standards before marking tasks complete
+  </Card>
+</CardGroup>
+
+## What's Next?
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get Mission Control running in 5 minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Detailed setup instructions for all environments
+  </Card>
+</CardGroup>

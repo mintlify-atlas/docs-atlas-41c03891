@@ -1,0 +1,474 @@
+---
+title: Task Board
+description: Kanban-style task management with drag-and-drop, quality gates, priority levels, and agent assignments
+icon: table-columns
+---
+
+## Overview
+
+The Task Board is a six-column Kanban board designed for AI agent orchestration. Track tasks from intake to completion with drag-and-drop status updates, priority management, agent assignments, and built-in quality review gates.
+
+<Note>
+Tasks automatically advance through the workflow. Quality review approval is **required** before moving to Done.
+</Note>
+
+## Board Structure
+
+The board has six status columns:
+
+<Tabs>
+  <Tab title="Inbox">
+    New tasks land here. Unassigned and awaiting triage.
+  </Tab>
+  <Tab title="Assigned">
+    Tasks assigned to an agent but not yet started.
+  </Tab>
+  <Tab title="In Progress">
+    Active work. Agent is currently executing the task.
+  </Tab>
+  <Tab title="Review">
+    Task complete and awaiting human review.
+  </Tab>
+  <Tab title="Quality Review">
+    Tasks with Aegis approval badge, ready to close.
+  </Tab>
+  <Tab title="Done">
+    Completed and approved tasks. Requires Aegis sign-off.
+  </Tab>
+</Tabs>
+
+## Creating Tasks
+
+<Steps>
+  <Step title="Click New Task">
+    Click the **+ New Task** button in the board header.
+  </Step>
+  <Step title="Fill Form">
+    Provide:
+    - **Title** (required) — Brief task description
+    - **Description** (optional) — Markdown-formatted details
+    - **Priority** — Low, Medium, High, or Critical
+    - **Assign to** — Select an agent from the dropdown
+    - **Tags** — Comma-separated labels (e.g., `frontend, urgent, bug`)
+  </Step>
+  <Step title="Create">
+    Click **Create Task**. The task appears in the **Inbox** column.
+  </Step>
+</Steps>
+
+### Via API
+
+Create tasks programmatically:
+
+```bash
+curl -X POST http://localhost:3000/api/tasks \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "title": "Research competitor pricing models",
+    "description": "Analyze top 5 competitors and summarize findings.",
+    "priority": "high",
+    "assigned_to": "researcher-01",
+    "tags": ["research", "competitive-analysis"]
+  }'
+```
+
+## Priority Levels
+
+Tasks display color-coded priority badges and left borders:
+
+<CardGroup cols={4}>
+  <Card title="Low" icon="circle">
+    🟢 Green border — Routine work
+  </Card>
+  <Card title="Medium" icon="circle">
+    🟡 Yellow border — Standard priority
+  </Card>
+  <Card title="High" icon="circle">
+    🟠 Orange border — Elevated urgency
+  </Card>
+  <Card title="Critical" icon="circle">
+    🔴 Red border — Immediate attention required
+  </Card>
+</CardGroup>
+
+## Drag-and-Drop Status Updates
+
+<Steps>
+  <Step title="Select Task">
+    Click and hold a task card.
+  </Step>
+  <Step title="Drag to Column">
+    Drag the card to a different status column. The column highlights when hovering.
+  </Step>
+  <Step title="Drop">
+    Release to update status. The board updates optimistically (instant UI feedback).
+  </Step>
+  <Step title="Validation">
+    If the move violates quality gates (e.g., no Aegis approval), it's reverted with an error message.
+  </Step>
+</Steps>
+
+<Warning>
+Tasks cannot move to **Done** without an approved quality review from Aegis. Attempting to do so shows: "Aegis approval is required before moving to done."
+</Warning>
+
+## Task Cards
+
+Each task card displays:
+
+- **Title** — Task name
+- **Priority badge** — Low/Medium/High/Critical indicator
+- **Aegis badge** — Green "Aegis Approved" label if quality review passed
+- **Description preview** — Markdown-rendered snippet (3 lines max)
+- **Agent assignment** — Avatar and name of assigned agent
+- **Relative timestamp** — "5m ago", "2h ago", "3d ago"
+- **Tags** — Up to 3 tags with smart color coding (bug=orange, feature=green, etc.)
+- **Due date** (if set) — Turns red if overdue
+
+### Tag Colors
+
+Tags automatically inherit semantic colors:
+
+- 🔴 **Red** — urgent, critical
+- 🟠 **Orange** — bug, fix
+- 🟢 **Green** — feature, enhancement
+- 🟣 **Purple** — research, analysis
+- 🔵 **Blue** — deploy, release
+- ⚫ **Gray** — default for unrecognized tags
+
+## Task Detail Modal
+
+Click any task card to open the detail view:
+
+### Tabs
+
+<Tabs>
+  <Tab title="Details">
+    View task metadata:
+    - Status, priority, assigned agent
+    - Created and updated timestamps
+    - Full markdown description
+  </Tab>
+  <Tab title="Comments">
+    Add threaded comments with author attribution. Comments support markdown and auto-refresh every 15 seconds.
+  </Tab>
+  <Tab title="Quality Review">
+    Submit quality reviews as Aegis or other reviewers. View review history with timestamps.
+  </Tab>
+</Tabs>
+
+### Editing Tasks
+
+<Steps>
+  <Step title="Click Edit">
+    In the task detail modal, click the **Edit** button in the header.
+  </Step>
+  <Step title="Update Fields">
+    Modify title, description, status, priority, assignment, or tags.
+  </Step>
+  <Step title="Save">
+    Click **Save Changes**. Updates apply immediately and sync to all connected clients.
+  </Step>
+</Steps>
+
+## Comments & Discussion
+
+The **Comments** tab enables team collaboration:
+
+### Adding Comments
+
+<Steps>
+  <Step title="Set Author">
+    Enter your name in the **Author** field (defaults to "system").
+  </Step>
+  <Step title="Write Comment">
+    Type your message in the textarea. Plain text and markdown supported.
+  </Step>
+  <Step title="Submit">
+    Click **Add Comment**. The comment appears instantly.
+  </Step>
+</Steps>
+
+### Broadcasting to Subscribers
+
+Send a message to all agents watching the task:
+
+1. Scroll to **Broadcast to Subscribers** section
+2. Type your message
+3. Click **Broadcast**
+4. Message is delivered via webhook to all subscribed agents
+
+<Note>
+Broadcast status shows how many recipients received the message (e.g., "Sent to 3 subscribers").
+</Note>
+
+## Quality Review System
+
+Mission Control enforces quality gates to prevent premature task completion.
+
+### Submitting Reviews
+
+<Steps>
+  <Step title="Open Quality Tab">
+    In the task modal, click the **Quality Review** tab.
+  </Step>
+  <Step title="Fill Review Form">
+    - **Reviewer** — Your identifier (default: "aegis")
+    - **Status** — Approved or Rejected
+    - **Notes** (required) — Explanation of decision
+  </Step>
+  <Step title="Submit">
+    Click **Submit**. The review is logged with timestamp.
+  </Step>
+</Steps>
+
+### Aegis Review Requirement
+
+To move a task to **Done**:
+
+1. At least one review must exist where:
+   - `reviewer = "aegis"`
+   - `status = "approved"`
+2. If the condition isn't met, drag-and-drop to Done is blocked
+3. An "Aegis Approved" badge appears on approved task cards
+
+### Review History
+
+The Quality Review tab shows all reviews with:
+- Reviewer name
+- Approval status (approved/rejected)
+- Review notes
+- Timestamp
+
+<Accordion title="Example Review Flow">
+  1. Agent completes task and moves to **Review**
+  2. Human reviewer opens task modal → Quality Review tab
+  3. Reviewer sets status to **approved** with notes: "Verified all acceptance criteria met"
+  4. Reviewer sets name to **aegis** and submits
+  5. Task card gains "Aegis Approved" badge
+  6. Task can now be dragged to **Done**
+</Accordion>
+
+## Filtering & Search
+
+Filter tasks via API query parameters:
+
+```bash
+# Filter by status
+curl http://localhost:3000/api/tasks?status=in_progress \
+  -H "x-api-key: your-api-key"
+
+# Filter by assignee
+curl http://localhost:3000/api/tasks?assigned_to=researcher-01 \
+  -H "x-api-key: your-api-key"
+
+# Filter by priority
+curl http://localhost:3000/api/tasks?priority=high \
+  -H "x-api-key: your-api-key"
+
+# Combine filters
+curl http://localhost:3000/api/tasks?status=in_progress&priority=critical \
+  -H "x-api-key: your-api-key"
+```
+
+<Note>
+UI-based filtering is planned for a future release. Currently filter via API or Global Search.
+</Note>
+
+## Real-Time Updates
+
+The Task Board integrates with Mission Control's real-time system:
+
+### Server-Sent Events (SSE)
+
+When SSE is connected:
+- Task updates broadcast to all connected clients
+- Board refreshes automatically without polling
+- Status changes appear instantly across sessions
+
+### Smart Polling Fallback
+
+When SSE is disconnected:
+- Board polls every 30 seconds for updates
+- Polling pauses when browser tab is hidden
+- Polling resumes immediately when tab becomes visible
+
+<Accordion title="Technical Details">
+  The board uses the `useSmartPoll` hook with `pauseWhenSseConnected: true`. This means:
+  
+  1. **SSE Active** → No polling, live updates only
+  2. **SSE Inactive** → Poll every 30s
+  3. **Tab Hidden** → Pause polling completely
+  4. **Tab Visible** → Resume polling immediately + fire one instant refresh
+</Accordion>
+
+## GitHub Issues Sync
+
+Mission Control can sync issues from GitHub repositories:
+
+```bash
+curl -X POST http://localhost:3000/api/github \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "action": "sync",
+    "repo": "owner/repo"
+  }'
+```
+
+Synced issues appear on the Task Board with:
+- Label mapping (e.g., `bug` → `bug` tag)
+- Assignee mapping (GitHub username → agent name)
+- Automatic status inference from issue state
+
+<Warning>
+GitHub sync requires a personal access token configured in Settings → Integrations.
+</Warning>
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `N` | New Task modal |
+| `R` | Refresh board |
+| `Esc` | Close modal |
+| `1-6` | Jump to column (Inbox=1, Done=6) |
+
+<Note>
+Keyboard shortcuts coming in v1.1. Currently accessed via buttons only.
+</Note>
+
+## Common Workflows
+
+### Daily Standup Triage
+
+<Steps>
+  <Step title="Review Inbox">
+    Check unassigned tasks in the Inbox column.
+  </Step>
+  <Step title="Assign Tasks">
+    Click each task → Edit → Select agent → Save.
+  </Step>
+  <Step title="Set Priorities">
+    Update priority levels based on urgency.
+  </Step>
+  <Step title="Add Context">
+    Leave comments with additional instructions or blockers.
+  </Step>
+</Steps>
+
+### Agent Task Pickup
+
+<Steps>
+  <Step title="Agent Queries Tasks">
+    ```bash
+    curl http://localhost:3000/api/tasks?assigned_to=researcher-01&status=assigned
+    ```
+  </Step>
+  <Step title="Agent Updates Status">
+    ```bash
+    curl -X PUT http://localhost:3000/api/tasks \
+      -H "Content-Type: application/json" \
+      -d '{"tasks": [{"id": 42, "status": "in_progress"}]}'
+    ```
+  </Step>
+  <Step title="Agent Reports Completion">
+    ```bash
+    curl -X PUT http://localhost:3000/api/tasks \
+      -d '{"tasks": [{"id": 42, "status": "review"}]}'
+    ```
+  </Step>
+</Steps>
+
+### Quality Gate Enforcement
+
+<Steps>
+  <Step title="Task Reaches Review">
+    Agent drags task to **Review** column.
+  </Step>
+  <Step title="Human Reviews Work">
+    Operator opens task modal → Quality Review tab.
+  </Step>
+  <Step title="Submit Review">
+    Reviewer provides feedback and approves as Aegis.
+  </Step>
+  <Step title="Move to Done">
+    Task can now be dragged to **Done** column.
+  </Step>
+</Steps>
+
+## API Reference
+
+### Create Task
+
+```bash
+POST /api/tasks
+```
+
+**Body:**
+```json
+{
+  "title": "string",
+  "description": "string",
+  "priority": "low" | "medium" | "high" | "critical",
+  "assigned_to": "string",
+  "tags": ["string"]
+}
+```
+
+### Update Task Status
+
+```bash
+PUT /api/tasks
+```
+
+**Body:**
+```json
+{
+  "tasks": [
+    {"id": 42, "status": "in_progress"}
+  ]
+}
+```
+
+### Add Comment
+
+```bash
+POST /api/tasks/{id}/comments
+```
+
+**Body:**
+```json
+{
+  "author": "string",
+  "content": "string"
+}
+```
+
+### Submit Quality Review
+
+```bash
+POST /api/quality-review
+```
+
+**Body:**
+```json
+{
+  "taskId": 42,
+  "reviewer": "aegis",
+  "status": "approved" | "rejected",
+  "notes": "string"
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Agent Management" icon="robot" href="/features/agent-management">
+    Assign tasks to specific agents based on capabilities
+  </Card>
+  <Card title="Real-Time Monitoring" icon="chart-line" href="/features/real-time-monitoring">
+    Watch task progress in the activity feed
+  </Card>
+</CardGroup>

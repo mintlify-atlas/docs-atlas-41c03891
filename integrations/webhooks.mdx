@@ -1,0 +1,802 @@
+---
+title: Webhooks
+description: Receive real-time HTTP callbacks for Mission Control events
+icon: webhook
+---
+
+## Overview
+
+**Webhooks** enable Mission Control to push events to your external services in real-time. Configure webhook endpoints to receive notifications about tasks, agents, activities, and security events.
+
+<Note>
+Webhooks use HMAC-SHA256 signatures for security and include automatic retry with exponential backoff.
+</Note>
+
+## Quick Start
+
+<Steps>
+
+<Step title="Create Webhook">
+```bash
+curl -X POST http://localhost:3000/api/webhooks \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_ADMIN_KEY" \
+  -d '{
+    "name": "Production Alerts",
+    "url": "https://your-app.com/webhooks/mission-control",
+    "events": ["activity.task_created", "agent.status_change", "security.login_failed"],
+    "generate_secret": true
+  }'
+```
+
+**Response:**
+```json
+{
+  "id": 1,
+  "name": "Production Alerts",
+  "url": "https://your-app.com/webhooks/mission-control",
+  "secret": "3f7a8c2e9d1b4a6f5e8c7d9a2b4c6e8f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1",
+  "events": ["activity.task_created", "agent.status_change", "security.login_failed"],
+  "enabled": true,
+  "message": "Webhook created. Save the secret - it won't be shown again in full."
+}
+```
+
+<Warning>
+**Save the secret immediately!** It's only shown once. You'll need it to verify webhook signatures.
+</Warning>
+
+</Step>
+
+<Step title="Verify Signature in Your Handler">
+Validate incoming webhooks using the HMAC signature:
+
+<CodeGroup>
+
+```javascript Node.js
+const crypto = require('crypto');
+const express = require('express');
+
+const app = express();
+
+// RAW body parser (required for signature verification)
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf.toString('utf8');
+  }
+}));
+
+app.post('/webhooks/mission-control', (req, res) => {
+  const signature = req.headers['x-mc-signature'];
+  const rawBody = req.rawBody;
+  const secret = process.env.WEBHOOK_SECRET;
+
+  // Verify signature
+  const expectedSignature = 'sha256=' + 
+    crypto.createHmac('sha256', secret)
+      .update(rawBody)
+      .digest('hex');
+
+  if (!crypto.timingSafeEqual(
+    Buffer.from(signature),
+    Buffer.from(expectedSignature)
+  )) {
+    return res.status(401).json({ error: 'Invalid signature' });
+  }
+
+  // Process event
+  const { event, data, timestamp } = req.body;
+  console.log(`Received event: ${event}`, data);
+
+  res.json({ ok: true });
+});
+
+app.listen(3001);
+```
+
+```python Flask
+from flask import Flask, request, jsonify
+import hmac
+import hashlib
+import os
+
+app = Flask(__name__)
+
+@app.route('/webhooks/mission-control', methods=['POST'])
+def webhook():
+    signature = request.headers.get('X-MC-Signature')
+    raw_body = request.get_data(as_text=True)
+    secret = os.getenv('WEBHOOK_SECRET')
+    
+    # Verify signature
+    expected_signature = 'sha256=' + hmac.new(
+        secret.encode('utf-8'),
+        raw_body.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+    
+    if not hmac.compare_digest(signature, expected_signature):
+        return jsonify({'error': 'Invalid signature'}), 401
+    
+    # Process event
+    payload = request.json
+    event = payload['event']
+    data = payload['data']
+    
+    print(f'Received event: {event}', data)
+    
+    return jsonify({'ok': True})
+
+if __name__ == '__main__':
+    app.run(port=3001)
+```
+
+```go Go
+package main
+
+import (
+    "crypto/hmac"
+    "crypto/sha256"
+    "encoding/hex"
+    "encoding/json"
+    "fmt"
+    "io/ioutil"
+    "net/http"
+    "os"
+)
+
+type WebhookPayload struct {
+    Event     string                 `json:"event"`
+    Timestamp int64                  `json:"timestamp"`
+    Data      map[string]interface{} `json:"data"`
+}
+
+func verifySignature(rawBody []byte, signature string, secret string) bool {
+    mac := hmac.New(sha256.New, []byte(secret))
+    mac.Write(rawBody)
+    expectedMAC := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+    return hmac.Equal([]byte(signature), []byte(expectedMAC))
+}
+
+func webhookHandler(w http.ResponseWriter, r *http.Request) {
+    rawBody, _ := ioutil.ReadAll(r.Body)
+    signature := r.Header.Get("X-MC-Signature")
+    secret := os.Getenv("WEBHOOK_SECRET")
+
+    if !verifySignature(rawBody, signature, secret) {
+        http.Error(w, "Invalid signature", http.StatusUnauthorized)
+        return
+    }
+
+    var payload WebhookPayload
+    json.Unmarshal(rawBody, &payload)
+
+    fmt.Printf("Received event: %s\n", payload.Event)
+
+    json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+func main() {
+    http.HandleFunc("/webhooks/mission-control", webhookHandler)
+    http.ListenAndServe(":3001", nil)
+}
+```
+
+</CodeGroup>
+
+</Step>
+
+<Step title="Test Webhook">
+```bash
+curl -X POST http://localhost:3000/api/webhooks/test \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_ADMIN_KEY" \
+  -d '{"id": 1}'
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "status_code": 200,
+  "response_body": "{\"ok\":true}",
+  "error": null,
+  "duration_ms": 142,
+  "delivery_id": 1
+}
+```
+
+</Step>
+
+</Steps>
+
+## Event Types
+
+Subscribe to specific events or use `*` for all events.
+
+### Activity Events
+
+| Event | Description |
+|-------|-------------|
+| `activity.task_created` | New task created |
+| `activity.task_updated` | Task modified |
+| `activity.task_deleted` | Task deleted |
+| `activity.task_status_changed` | Task status changed |
+| `activity.task_assigned` | Task assigned to agent |
+| `activity.comment_added` | Comment added to task |
+| `activity.agent_created` | New agent provisioned |
+| `activity.connection_created` | CLI connection established |
+| `activity.connection_disconnected` | CLI connection closed |
+
+### Agent Events
+
+| Event | Description |
+|-------|-------------|
+| `agent.status_change` | Agent status changed (online, offline, idle, busy, error) |
+| `agent.error` | Agent entered error state |
+
+### Notification Events
+
+| Event | Description |
+|-------|-------------|
+| `notification.mention` | Agent mentioned in comment |
+| `notification.task_assigned` | Task assigned notification |
+| `notification.info` | Informational notification |
+| `notification.warning` | Warning notification |
+| `notification.error` | Error notification |
+
+### Security Events
+
+| Event | Description |
+|-------|-------------|
+| `security.login_success` | Successful login |
+| `security.login_failed` | Failed login attempt |
+| `security.api_key_used` | API key authentication |
+| `security.unauthorized_access` | Unauthorized access attempt |
+| `security.role_changed` | User role modified |
+
+### Wildcard
+
+| Event | Description |
+|-------|-------------|
+| `*` | Subscribe to all events |
+
+<Tip>
+Start with `*` during development, then narrow to specific events for production to reduce traffic.
+</Tip>
+
+## Webhook Payload Format
+
+All webhooks deliver JSON with this structure:
+
+```json
+{
+  "event": "activity.task_created",
+  "timestamp": 1709582400,
+  "data": {
+    "id": 123,
+    "title": "Fix authentication bug",
+    "status": "inbox",
+    "priority": "high",
+    "assigned_to": "debugging-agent",
+    "created_by": "alice",
+    "created_at": 1709582400
+  }
+}
+```
+
+<ParamField body="event" type="string">
+  Event type identifier
+</ParamField>
+
+<ParamField body="timestamp" type="number">
+  Unix timestamp (seconds) when event occurred
+</ParamField>
+
+<ParamField body="data" type="object">
+  Event-specific payload. Structure varies by event type.
+</ParamField>
+
+### HTTP Headers
+
+Mission Control sends these headers with every webhook:
+
+| Header | Value | Purpose |
+|--------|-------|----------|
+| `Content-Type` | `application/json` | Payload format |
+| `User-Agent` | `MissionControl-Webhook/1.0` | Identify sender |
+| `X-MC-Event` | `activity.task_created` | Event type (for routing) |
+| `X-MC-Signature` | `sha256=abc123...` | HMAC-SHA256 signature |
+
+## Signature Verification
+
+Mission Control signs all webhook payloads using **HMAC-SHA256**.
+
+### Signature Format
+
+```
+X-MC-Signature: sha256=<hex_digest>
+```
+
+The signature is computed as:
+```
+HMAC-SHA256(secret, raw_json_body)
+```
+
+### Verification Algorithm
+
+<Steps>
+
+<Step title="Extract Components">
+- Get `X-MC-Signature` header
+- Get raw request body (UTF-8 string, **before** parsing JSON)
+- Get webhook `secret` from creation response
+</Step>
+
+<Step title="Compute Expected Signature">
+```javascript
+const expectedSignature = 'sha256=' + 
+  crypto.createHmac('sha256', secret)
+    .update(rawBody)
+    .digest('hex');
+```
+</Step>
+
+<Step title="Compare Using Constant-Time Function">
+```javascript
+if (!crypto.timingSafeEqual(
+  Buffer.from(receivedSignature),
+  Buffer.from(expectedSignature)
+)) {
+  throw new Error('Invalid signature');
+}
+```
+
+<Warning>
+**Always use constant-time comparison** to prevent timing attacks:
+- Node.js: `crypto.timingSafeEqual()`
+- Python: `hmac.compare_digest()`
+- Go: `hmac.Equal()`
+
+Never use `===` or `==` for signature comparison!
+</Warning>
+
+</Step>
+
+</Steps>
+
+### Helper Function
+
+Mission Control exports a verification helper:
+
+```typescript
+import { verifyWebhookSignature } from '@/lib/webhooks';
+
+const isValid = verifyWebhookSignature(
+  secret,
+  rawBody,
+  req.headers['x-mc-signature']
+);
+```
+
+## Retry Logic
+
+Webhooks automatically retry on failure with **exponential backoff**.
+
+### Retry Schedule
+
+| Attempt | Delay | Cumulative Time |
+|---------|-------|------------------|
+| 1 | Immediate | 0s |
+| 2 | 30s ± 20% | ~30s |
+| 3 | 5m ± 20% | ~5.5m |
+| 4 | 30m ± 20% | ~35m |
+| 5 | 2h ± 20% | ~2h 35m |
+| 6 | 8h ± 20% | ~10h 35m |
+
+**Total attempts:** 6 (1 initial + 5 retries)
+
+<Note>
+Retries include **±20% jitter** to prevent thundering herd issues.
+</Note>
+
+### Success Criteria
+
+A delivery is considered successful if:
+- HTTP status code: **200-299**
+- Response received within **10 seconds**
+
+### Failure Criteria
+
+A delivery fails if:
+- HTTP status code: **≥300** or connection error
+- Request times out after **10 seconds**
+- Network error (DNS, connection refused, etc.)
+
+### Circuit Breaker
+
+After **5 consecutive failures** (configurable via `MC_WEBHOOK_MAX_RETRIES`):
+- Webhook is **automatically disabled**
+- No further deliveries are attempted
+- Log entry: `Webhook circuit breaker tripped — disabled after exhausting retries`
+
+**To re-enable:**
+```bash
+curl -X PUT http://localhost:3000/api/webhooks \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_ADMIN_KEY" \
+  -d '{"id": 1, "reset_circuit": true}'
+```
+
+This:
+- Resets `consecutive_failures` to 0
+- Sets `enabled` to `true`
+- Allows new deliveries
+
+## Management API
+
+### List Webhooks
+
+```bash
+curl http://localhost:3000/api/webhooks \
+  -H "x-api-key: YOUR_ADMIN_KEY"
+```
+
+**Response:**
+```json
+{
+  "webhooks": [
+    {
+      "id": 1,
+      "name": "Production Alerts",
+      "url": "https://your-app.com/webhooks/mission-control",
+      "secret": "••••••9c1",
+      "events": ["activity.task_created", "agent.status_change"],
+      "enabled": true,
+      "consecutive_failures": 0,
+      "circuit_open": false,
+      "last_fired_at": 1709582400,
+      "last_status": 200,
+      "total_deliveries": 142,
+      "successful_deliveries": 140,
+      "failed_deliveries": 2,
+      "created_at": 1709400000,
+      "created_by": "admin"
+    }
+  ]
+}
+```
+
+### Update Webhook
+
+```bash
+curl -X PUT http://localhost:3000/api/webhooks \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_ADMIN_KEY" \
+  -d '{
+    "id": 1,
+    "name": "Updated Name",
+    "events": ["agent.status_change", "agent.error"],
+    "enabled": false
+  }'
+```
+
+<ParamField body="id" type="number" required>
+  Webhook ID to update
+</ParamField>
+
+<ParamField body="name" type="string">
+  New webhook name
+</ParamField>
+
+<ParamField body="url" type="string">
+  New endpoint URL
+</ParamField>
+
+<ParamField body="events" type="array">
+  New event subscriptions
+</ParamField>
+
+<ParamField body="enabled" type="boolean">
+  Enable or disable webhook
+</ParamField>
+
+<ParamField body="regenerate_secret" type="boolean">
+  Generate new secret (returns in response)
+</ParamField>
+
+<ParamField body="reset_circuit" type="boolean">
+  Reset circuit breaker and re-enable webhook
+</ParamField>
+
+### Delete Webhook
+
+```bash
+curl -X DELETE http://localhost:3000/api/webhooks \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_ADMIN_KEY" \
+  -d '{"id": 1}'
+```
+
+Deletes webhook and all delivery history.
+
+### View Delivery History
+
+```bash
+curl "http://localhost:3000/api/webhooks/deliveries?webhook_id=1&limit=20" \
+  -H "x-api-key: YOUR_ADMIN_KEY"
+```
+
+**Response:**
+```json
+{
+  "deliveries": [
+    {
+      "id": 123,
+      "webhook_id": 1,
+      "event_type": "activity.task_created",
+      "status_code": 200,
+      "response_body": "{\"ok\":true}",
+      "error": null,
+      "duration_ms": 142,
+      "attempt": 0,
+      "is_retry": 0,
+      "next_retry_at": null,
+      "created_at": 1709582400
+    }
+  ],
+  "total": 142
+}
+```
+
+Mission Control keeps the **last 200 deliveries** per webhook.
+
+### Manual Retry
+
+```bash
+curl -X POST http://localhost:3000/api/webhooks/retry \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_ADMIN_KEY" \
+  -d '{"delivery_id": 123}'
+```
+
+Manually retry a failed delivery (useful for debugging).
+
+## Environment Configuration
+
+```bash
+# Maximum retry attempts before circuit breaker trips (default: 5)
+MC_WEBHOOK_MAX_RETRIES=5
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+
+<Card title="Idempotency" icon="shield-check">
+Webhooks may deliver the same event multiple times (retries). Design handlers to be idempotent:
+
+```javascript
+const processedEvents = new Set();
+
+app.post('/webhook', (req, res) => {
+  const eventId = `${req.body.event}-${req.body.data.id}`;
+  
+  if (processedEvents.has(eventId)) {
+    return res.json({ ok: true }); // Already processed
+  }
+  
+  processEvent(req.body);
+  processedEvents.add(eventId);
+  res.json({ ok: true });
+});
+```
+</Card>
+
+<Card title="Fast Response" icon="gauge-high">
+Respond quickly (< 1s) to avoid timeouts:
+
+```javascript
+app.post('/webhook', async (req, res) => {
+  // Respond immediately
+  res.json({ ok: true });
+  
+  // Process asynchronously
+  processEventAsync(req.body).catch(err => {
+    console.error('Background processing failed:', err);
+  });
+});
+```
+</Card>
+
+<Card title="Secret Rotation" icon="rotate">
+Rotate webhook secrets periodically:
+
+1. Create new webhook with new secret
+2. Update your handler to accept both secrets
+3. Wait for old deliveries to drain (24h)
+4. Delete old webhook
+</Card>
+
+<Card title="Monitor Failures" icon="chart-line">
+Set up alerts for:
+- `consecutive_failures > 3`
+- `circuit_open = true`
+- Sudden spike in failed deliveries
+
+Query delivery stats:
+```sql
+SELECT webhook_id, 
+  COUNT(*) as total,
+  SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) as success
+FROM webhook_deliveries
+WHERE created_at > unixepoch() - 86400
+GROUP BY webhook_id;
+```
+</Card>
+
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+
+<Accordion title="Webhook deliveries fail with 'Invalid signature'">
+**Cause:** Your handler's signature verification is incorrect.
+
+**Debug steps:**
+1. Ensure you're using **raw body** (before JSON parsing)
+2. Log both signatures for comparison:
+   ```javascript
+   console.log('Received:', req.headers['x-mc-signature']);
+   console.log('Expected:', expectedSignature);
+   ```
+3. Verify secret matches (check for leading/trailing whitespace)
+4. Use `timingSafeEqual()` for comparison
+
+**Test with curl:**
+```bash
+# Generate test signature
+echo -n '{"event":"test","data":{}}' | \
+  openssl dgst -sha256 -hmac "YOUR_SECRET" | \
+  awk '{print "sha256="$2}'
+```
+</Accordion>
+
+<Accordion title="Circuit breaker keeps tripping">
+**Cause:** Your endpoint is unreliable or timing out.
+
+**Solutions:**
+- Check webhook delivery logs: `GET /api/webhooks/deliveries?webhook_id=1`
+- Ensure your handler responds within 10 seconds
+- Return 200 status code on success
+- Check for network/firewall issues
+- Temporarily disable circuit breaker: `MC_WEBHOOK_MAX_RETRIES=999`
+
+**Reset circuit:**
+```bash
+curl -X PUT http://localhost:3000/api/webhooks \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: ADMIN_KEY" \
+  -d '{"id": 1, "reset_circuit": true}'
+```
+</Accordion>
+
+<Accordion title="Not receiving events for specific event types">
+**Cause:** Event not in subscription list or event mapping issue.
+
+**Debug:**
+1. List webhook config: `GET /api/webhooks`
+2. Check `events` array includes the event type
+3. Update subscription:
+   ```bash
+   curl -X PUT http://localhost:3000/api/webhooks \
+     -d '{"id": 1, "events": ["*"]}'
+   ```
+4. Test delivery: `POST /api/webhooks/test`
+
+**Internal events vs webhook events:**
+Some internal events are mapped to webhook event types (see `EVENT_MAP` in `/src/lib/webhooks.ts:36`).
+</Accordion>
+
+<Accordion title="Retries not working">
+**Cause:** Scheduler not running or deliveries not recorded.
+
+**Check scheduler:**
+```bash
+curl http://localhost:3000/api/scheduler \
+  -H "x-api-key: ADMIN_KEY"
+```
+
+**Manually trigger retry processing:**
+```bash
+curl -X POST http://localhost:3000/api/scheduler \
+  -H "x-api-key: ADMIN_KEY" \
+  -d '{"action": "run_now", "job": "webhook_retries"}'
+```
+</Accordion>
+
+</AccordionGroup>
+
+## Security Considerations
+
+<Warning>
+**Always verify signatures** in production. An attacker could forge webhook payloads without signature verification.
+</Warning>
+
+<CardGroup cols={2}>
+
+<Card title="HTTPS Only" icon="lock">
+Use HTTPS endpoints in production:
+```
+✅ https://your-app.com/webhook
+❌ http://your-app.com/webhook
+```
+
+Mission Control allows HTTP for local development only.
+</Card>
+
+<Card title="IP Whitelisting" icon="shield">
+Restrict webhook requests to Mission Control server IPs:
+
+```nginx
+# nginx example
+location /webhooks/mission-control {
+    allow 10.0.1.0/24;  # MC server subnet
+    deny all;
+    proxy_pass http://localhost:3001;
+}
+```
+</Card>
+
+<Card title="Rate Limiting" icon="gauge">
+Protect your webhook endpoint:
+
+```javascript
+const rateLimit = require('express-rate-limit');
+
+const limiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 100, // 100 requests per minute
+});
+
+app.use('/webhooks', limiter);
+```
+</Card>
+
+<Card title="Logging" icon="file-lines">
+Log all webhook deliveries for audit:
+
+```javascript
+app.post('/webhook', (req, res) => {
+  logger.info({
+    event: req.body.event,
+    timestamp: req.body.timestamp,
+    signature_valid: verifySignature(...),
+    source_ip: req.ip,
+  }, 'Webhook received');
+  
+  res.json({ ok: true });
+});
+```
+</Card>
+
+</CardGroup>
+
+## Related Docs
+
+<CardGroup cols={3}>
+
+<Card title="CLI Integration" icon="terminal" href="/integrations/cli-integration">
+  Real-time events via Server-Sent Events
+</Card>
+
+<Card title="GitHub Sync" icon="github" href="/integrations/github-sync">
+  Webhook automation examples
+</Card>
+
+<Card title="Event Bus" icon="broadcast-tower" href="/architecture/event-bus">
+  Internal event system
+</Card>
+
+</CardGroup>

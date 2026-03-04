@@ -1,0 +1,541 @@
+---
+title: 'Pipeline Orchestration'
+description: 'Chain workflow templates into multi-step pipelines with execution monitoring and failure handling'
+icon: 'diagram-project'
+---
+
+## Overview
+
+**Pipeline Orchestration** lets you chain multiple workflow templates together into multi-step execution pipelines. Each pipeline defines a sequence of templates that run in order, with configurable failure handling (stop or continue) and real-time execution monitoring.
+
+<Info>
+Pipelines are ideal for complex workflows like CI/CD, data processing, or multi-stage agent tasks that require sequential execution with visibility into each step's status.
+</Info>
+
+## Architecture
+
+Pipelines consist of three layers:
+
+<Steps>
+  <Step title="Workflow Templates">
+    Reusable templates that define agent model, prompt, and parameters. Templates are created once and referenced by multiple pipelines.
+  </Step>
+
+  <Step title="Pipeline Definitions">
+    Named sequences of workflow templates with failure handling rules. Stored in the `pipelines` table.
+
+    ```typescript
+    interface Pipeline {
+      id: number
+      name: string
+      description: string | null
+      steps: PipelineStep[]        // Template sequence
+      use_count: number             // Execution counter
+      last_used_at: number | null
+      runs: {                       // Aggregated run stats
+        total: number
+        completed: number
+        failed: number
+        running: number
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Pipeline Runs">
+    Execution instances that track progress through steps. Each run maintains state for all steps.
+
+    ```typescript
+    interface PipelineRun {
+      id: number
+      pipeline_id: number
+      status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+      current_step: number          // 0-based index
+      steps_snapshot: RunStepState[] // Execution state per step
+      started_at: number | null
+      completed_at: number | null
+      triggered_by: string          // User or system
+      created_at: number
+    }
+    ```
+  </Step>
+</Steps>
+
+## Pipeline Steps
+
+Each step references a workflow template and defines failure behavior:
+
+<CodeGroup>
+```typescript Interface
+interface PipelineStep {
+  template_id: number        // References workflows table
+  template_name?: string     // Denormalized for display
+  on_failure: 'stop' | 'continue'
+}
+```
+
+```json Example
+{
+  "name": "Deploy to Production",
+  "steps": [
+    {
+      "template_id": 1,
+      "template_name": "Run Tests",
+      "on_failure": "stop"
+    },
+    {
+      "template_id": 2,
+      "template_name": "Build Assets",
+      "on_failure": "stop"
+    },
+    {
+      "template_id": 3,
+      "template_name": "Deploy to Staging",
+      "on_failure": "stop"
+    },
+    {
+      "template_id": 4,
+      "template_name": "Smoke Tests",
+      "on_failure": "continue"
+    },
+    {
+      "template_id": 5,
+      "template_name": "Deploy to Production",
+      "on_failure": "stop"
+    }
+  ]
+}
+```
+</CodeGroup>
+
+<Warning>
+**Stop vs Continue**: `on_failure: "stop"` terminates the pipeline immediately. `on_failure: "continue"` marks the step as failed but proceeds to the next step. Use "continue" for non-critical steps like notifications.
+</Warning>
+
+## Run State Tracking
+
+Each run maintains detailed state for every step:
+
+<Tabs>
+  <Tab title="Step State">
+    ```typescript
+    interface RunStepState {
+      step_index: number
+      template_id: number
+      template_name: string
+      status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+      spawn_id: string | null      // References spawned agent session
+      started_at: number | null
+      completed_at: number | null
+      error: string | null
+    }
+    ```
+  </Tab>
+
+  <Tab title="State Transitions">
+    ```mermaid
+    graph LR
+      A[pending] --> B[running]
+      B --> C[completed]
+      B --> D[failed]
+      A --> E[skipped]
+      D --> E
+    ```
+
+    - **pending**: Step not yet started
+    - **running**: Step execution in progress
+    - **completed**: Step finished successfully
+    - **failed**: Step failed (may trigger pipeline stop)
+    - **skipped**: Step skipped due to previous failure + continue policy
+  </Tab>
+
+  <Tab title="Example Run">
+    ```json
+    {
+      "id": 42,
+      "pipeline_id": 7,
+      "status": "running",
+      "current_step": 2,
+      "steps_snapshot": [
+        {
+          "step_index": 0,
+          "template_name": "Run Tests",
+          "status": "completed",
+          "spawn_id": "spawn-abc123",
+          "started_at": 1709568000,
+          "completed_at": 1709568120,
+          "error": null
+        },
+        {
+          "step_index": 1,
+          "template_name": "Build Assets",
+          "status": "completed",
+          "spawn_id": "spawn-def456",
+          "started_at": 1709568121,
+          "completed_at": 1709568200,
+          "error": null
+        },
+        {
+          "step_index": 2,
+          "template_name": "Deploy to Staging",
+          "status": "running",
+          "spawn_id": "spawn-ghi789",
+          "started_at": 1709568201,
+          "completed_at": null,
+          "error": null
+        }
+      ],
+      "started_at": 1709568000,
+      "triggered_by": "admin"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## UI Components
+
+The Pipeline Tab provides a full management interface:
+
+### Active Run Banner
+
+Shows currently running pipelines at the top:
+
+```tsx
+function ActiveRunCard({ run, onAdvance, onCancel }) {
+  return (
+    <div className="p-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5">
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+          <span className="text-xs font-medium">
+            {run.pipeline_name} — Run #{run.id}
+          </span>
+        </div>
+        <span className="text-2xs text-muted-foreground">
+          Step {run.current_step + 1}/{run.steps_snapshot.length}
+        </span>
+      </div>
+      <RunStepsViz steps={run.steps_snapshot} />
+      <div className="flex gap-1 mt-2">
+        <button onClick={() => onAdvance(run.id, true)}>Step Done</button>
+        <button onClick={() => onAdvance(run.id, false)}>Step Failed</button>
+        <button onClick={() => onCancel(run.id)}>Cancel</button>
+      </div>
+    </div>
+  )
+}
+```
+
+### Pipeline Visualization
+
+Displays step sequence with arrows:
+
+```tsx
+function PipelineViz({ steps }) {
+  return (
+    <div className="flex items-center gap-1 overflow-x-auto py-1">
+      {steps.map((s, i) => (
+        <div key={i} className="flex items-center gap-1 shrink-0">
+          <div className="flex flex-col items-center gap-0.5">
+            <div className="px-2 py-1.5 rounded-md border bg-secondary">
+              {s.template_name}
+            </div>
+            {s.on_failure === 'continue' && (
+              <span className="text-2xs text-amber-400">continue on fail</span>
+            )}
+          </div>
+          {i < steps.length - 1 && (
+            <svg viewBox="0 0 20 12" className="w-5 h-3">
+              <path d="M0 6h16M13 2l4 4-4 4" />
+            </svg>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+```
+
+### Run Steps Visualization
+
+Shows execution progress with colored status dots:
+
+```tsx
+function RunStepsViz({ steps }) {
+  return (
+    <div className="flex items-center gap-1">
+      {steps.map((s, i) => (
+        <div key={i} className="flex items-center gap-1">
+          <span className={`w-2 h-2 rounded-full ${
+            s.status === 'completed' ? 'bg-green-500' :
+            s.status === 'running' ? 'bg-amber-500 animate-pulse' :
+            s.status === 'failed' ? 'bg-red-500' :
+            s.status === 'skipped' ? 'bg-gray-500' : 'bg-gray-600'
+          }`} />
+          <span className="text-2xs">{s.template_name}</span>
+          {i < steps.length - 1 && <svg>...</svg>}
+        </div>
+      ))}
+    </div>
+  )
+}
+```
+
+## API Reference
+
+### Create Pipeline
+
+<CodeGroup>
+```bash POST /api/pipelines
+curl -X POST "http://localhost:3000/api/pipelines" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Deploy to Production",
+    "description": "Full deployment pipeline with testing",
+    "steps": [
+      { "template_id": 1, "on_failure": "stop" },
+      { "template_id": 2, "on_failure": "stop" },
+      { "template_id": 3, "on_failure": "continue" }
+    ]
+  }'
+```
+
+```json Response
+{
+  "success": true,
+  "pipeline": {
+    "id": 5,
+    "name": "Deploy to Production",
+    "description": "Full deployment pipeline with testing",
+    "steps": [...],
+    "created_at": 1709568000
+  }
+}
+```
+</CodeGroup>
+
+### List Pipelines
+
+<CodeGroup>
+```bash GET /api/pipelines
+curl "http://localhost:3000/api/pipelines" \
+  -H "x-api-key: YOUR_API_KEY"
+```
+
+```json Response
+{
+  "pipelines": [
+    {
+      "id": 5,
+      "name": "Deploy to Production",
+      "description": "Full deployment pipeline",
+      "steps": [...],
+      "use_count": 12,
+      "last_used_at": 1709568000,
+      "runs": {
+        "total": 12,
+        "completed": 10,
+        "failed": 2,
+        "running": 0
+      }
+    }
+  ]
+}
+```
+</CodeGroup>
+
+### Start Pipeline Run
+
+<CodeGroup>
+```bash POST /api/pipelines/run
+curl -X POST "http://localhost:3000/api/pipelines/run" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "start",
+    "pipeline_id": 5
+  }'
+```
+
+```json Response
+{
+  "success": true,
+  "run": {
+    "id": 42,
+    "pipeline_id": 5,
+    "status": "running",
+    "current_step": 0,
+    "steps_snapshot": [...],
+    "started_at": 1709568000,
+    "triggered_by": "admin"
+  }
+}
+```
+</CodeGroup>
+
+### Advance Run Step
+
+<CodeGroup>
+```bash POST /api/pipelines/run (advance)
+curl -X POST "http://localhost:3000/api/pipelines/run" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "advance",
+    "run_id": 42,
+    "success": true
+  }'
+```
+
+```json Response
+{
+  "success": true,
+  "run": {
+    "id": 42,
+    "status": "running",
+    "current_step": 1,
+    "steps_snapshot": [...]
+  }
+}
+```
+</CodeGroup>
+
+### Cancel Pipeline Run
+
+<CodeGroup>
+```bash POST /api/pipelines/run (cancel)
+curl -X POST "http://localhost:3000/api/pipelines/run" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "cancel",
+    "run_id": 42
+  }'
+```
+
+```json Response
+{
+  "success": true,
+  "run": {
+    "id": 42,
+    "status": "cancelled",
+    "completed_at": 1709568300
+  }
+}
+```
+</CodeGroup>
+
+## Workflow Templates
+
+Pipelines reference workflow templates. Create templates first:
+
+<CodeGroup>
+```bash POST /api/workflows
+curl -X POST "http://localhost:3000/api/workflows" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Run Tests",
+    "model": "claude-3-5-sonnet-20241022",
+    "prompt": "Run the test suite and report results",
+    "parameters": {
+      "temperature": 0.2,
+      "max_tokens": 4000
+    }
+  }'
+```
+
+```bash GET /api/workflows
+curl "http://localhost:3000/api/workflows" \
+  -H "x-api-key: YOUR_API_KEY"
+```
+</CodeGroup>
+
+## Best Practices
+
+<Tabs>
+  <Tab title="Pipeline Design">
+    - **Keep pipelines focused**: 3-7 steps is optimal
+    - **Use descriptive names**: "Deploy Production" not "Pipeline 1"
+    - **Group related workflows**: Create separate pipelines for different domains
+    - **Test in isolation**: Validate each template before adding to pipeline
+  </Tab>
+
+  <Tab title="Failure Handling">
+    - **Critical steps**: Use `on_failure: "stop"` for tests, builds, deploys
+    - **Non-critical steps**: Use `on_failure: "continue"` for notifications, cleanup
+    - **Order matters**: Place critical validation steps early
+    - **Add recovery steps**: Include rollback templates after risky operations
+  </Tab>
+
+  <Tab title="Monitoring">
+    - Watch the Active Run Banner for in-progress pipelines
+    - Check run history in the expanded pipeline card
+    - Use `GET /api/pipelines/run?limit=N` to fetch recent runs
+    - Monitor `spawn_id` to track which agent executed each step
+  </Tab>
+</Tabs>
+
+## Example Pipelines
+
+<CodeGroup>
+```json CI/CD Pipeline
+{
+  "name": "CI/CD Pipeline",
+  "description": "Full continuous integration and deployment",
+  "steps": [
+    { "template_id": 1, "template_name": "Run Linter", "on_failure": "stop" },
+    { "template_id": 2, "template_name": "Run Unit Tests", "on_failure": "stop" },
+    { "template_id": 3, "template_name": "Build Docker Image", "on_failure": "stop" },
+    { "template_id": 4, "template_name": "Deploy to Staging", "on_failure": "stop" },
+    { "template_id": 5, "template_name": "Run E2E Tests", "on_failure": "stop" },
+    { "template_id": 6, "template_name": "Notify Team", "on_failure": "continue" },
+    { "template_id": 7, "template_name": "Deploy to Production", "on_failure": "stop" }
+  ]
+}
+```
+
+```json Data Processing Pipeline
+{
+  "name": "ETL Pipeline",
+  "description": "Extract, transform, load data",
+  "steps": [
+    { "template_id": 10, "template_name": "Extract from API", "on_failure": "stop" },
+    { "template_id": 11, "template_name": "Validate Data", "on_failure": "stop" },
+    { "template_id": 12, "template_name": "Transform Data", "on_failure": "stop" },
+    { "template_id": 13, "template_name": "Load to Database", "on_failure": "stop" },
+    { "template_id": 14, "template_name": "Generate Report", "on_failure": "continue" },
+    { "template_id": 15, "template_name": "Cleanup Temp Files", "on_failure": "continue" }
+  ]
+}
+```
+</CodeGroup>
+
+## Troubleshooting
+
+<Steps>
+  <Step title="Pipeline won't start">
+    - Verify all referenced template IDs exist
+    - Check that pipeline has at least 2 steps
+    - Ensure user has `operator` role or higher
+  </Step>
+
+  <Step title="Steps not advancing">
+    - Use the UI "Step Done" / "Step Failed" buttons to manually advance
+    - Check that spawned agent sessions are completing
+    - Verify `spawn_id` is being set correctly
+  </Step>
+
+  <Step title="Run stuck in 'running' state">
+    - Use `POST /api/pipelines/run` with `action: "cancel"` to force stop
+    - Check for orphaned agent sessions
+    - Review Mission Control logs for errors
+  </Step>
+</Steps>
+
+## Related
+
+- [Agent Management](/features/agent-management) - Managing agent execution
+- [Task Board](/features/task-board) - Task management and workflows
+- [Background Automation](/features/background-automation) - Automated scheduling

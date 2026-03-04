@@ -1,0 +1,464 @@
+---
+title: Installation
+description: Detailed installation instructions for Mission Control including prerequisites, environment configuration, and deployment options.
+---
+
+## Prerequisites
+
+<Note>
+Mission Control requires Node.js 20+ (LTS recommended) and pnpm for dependency management.
+</Note>
+
+### Node.js
+
+Install Node.js 20 or later from [nodejs.org](https://nodejs.org/) or use a version manager:
+
+<CodeGroup>
+```bash nvm
+nvm install 20
+nvm use 20
+```
+
+```bash fnm
+fnm install 20
+fnm use 20
+```
+</CodeGroup>
+
+Verify installation:
+
+```bash
+node --version  # Should show v20.x.x or higher
+```
+
+### pnpm
+
+Mission Control uses pnpm for fast, efficient dependency management. Install pnpm using one of these methods:
+
+<CodeGroup>
+```bash npm
+npm install -g pnpm
+```
+
+```bash corepack (recommended)
+corepack enable
+corepack prepare pnpm@latest --activate
+```
+</CodeGroup>
+
+Verify installation:
+
+```bash
+pnpm --version  # Should show 8.x.x or higher
+```
+
+### Native Build Tools
+
+Mission Control uses `better-sqlite3` which requires native compilation. Install build tools for your platform:
+
+<CodeGroup>
+```bash Ubuntu/Debian
+sudo apt-get update
+sudo apt-get install -y python3 make g++
+```
+
+```bash macOS
+xcode-select --install
+```
+
+```bash Windows
+npm install --global windows-build-tools
+```
+</CodeGroup>
+
+## Development Setup
+
+<Steps>
+  <Step title="Clone Repository">
+    ```bash
+    git clone https://github.com/builderz-labs/mission-control.git
+    cd mission-control
+    ```
+  </Step>
+
+  <Step title="Install Dependencies">
+    ```bash
+    pnpm install
+    ```
+
+    This installs all dependencies and compiles native modules. The process takes 1-2 minutes on first run.
+
+    <Info>
+    The `better-sqlite3` module is compiled during installation. If compilation fails, ensure you have the required build tools installed.
+    </Info>
+  </Step>
+
+  <Step title="Configure Environment">
+    Copy the example environment file:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    Edit `.env` with your configuration. See [Environment Variables](#environment-variables) for details.
+  </Step>
+
+  <Step title="Start Development Server">
+    ```bash
+    pnpm dev
+    ```
+
+    The server starts at [http://localhost:3000](http://localhost:3000). Changes to source files trigger automatic recompilation.
+  </Step>
+</Steps>
+
+## Production Deployment
+
+### Direct Deployment
+
+Build and run Mission Control directly on your server:
+
+<Steps>
+  <Step title="Install Dependencies">
+    ```bash
+    pnpm install --frozen-lockfile
+    ```
+
+    The `--frozen-lockfile` flag ensures reproducible builds by using the exact versions in `pnpm-lock.yaml`.
+  </Step>
+
+  <Step title="Build Application">
+    ```bash
+    pnpm build
+    ```
+
+    Creates an optimized production build in `.next/`. Build time is typically 2-3 minutes.
+
+    <Warning>
+    The production build bundles platform-specific native binaries. Build on the same OS and architecture as your target server. A build created on macOS will not work on Linux.
+    </Warning>
+  </Step>
+
+  <Step title="Start Production Server">
+    ```bash
+    pnpm start
+    ```
+
+    The server binds to `0.0.0.0:3005` by default. Override with environment variables:
+
+    ```bash
+    PORT=8080 pnpm start
+    ```
+  </Step>
+</Steps>
+
+### Docker Deployment
+
+Deploy Mission Control using Docker for isolation and portability:
+
+```bash
+docker build -t mission-control .
+docker run -p 3000:3000 \
+  -v mission-control-data:/app/.data \
+  -e AUTH_USER=admin \
+  -e AUTH_PASS=your-secure-password \
+  -e API_KEY=your-api-key \
+  mission-control
+```
+
+<Info>
+The Docker image uses a multi-stage build with `node:20-slim`, compiles native modules inside the container, and runs as non-root user `nextjs`.
+</Info>
+
+#### Persistent Data
+
+Mount a volume to persist the SQLite database across container restarts:
+
+```bash
+docker run -v /path/to/data:/app/.data mission-control
+```
+
+#### docker-compose
+
+Create `docker-compose.yml`:
+
+```yaml docker-compose.yml
+version: '3.8'
+
+services:
+  mission-control:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - mission-control-data:/app/.data
+    environment:
+      - AUTH_USER=admin
+      - AUTH_PASS=your-secure-password
+      - API_KEY=your-api-key
+      - MC_ALLOWED_HOSTS=localhost,yourdomain.com
+    restart: unless-stopped
+
+volumes:
+  mission-control-data:
+```
+
+Start with:
+
+```bash
+docker-compose up -d
+```
+
+## Environment Variables
+
+Configure Mission Control via environment variables in `.env`:
+
+### Authentication
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `AUTH_USER` | No | `admin` | Initial admin username (seeded on first run) |
+| `AUTH_PASS` | Yes | - | Initial admin password |
+| `AUTH_PASS_B64` | No | - | Base64-encoded password (overrides `AUTH_PASS`) |
+| `API_KEY` | Yes | - | API key for headless/programmatic access |
+| `AUTH_SECRET` | No | - | Legacy cookie secret (backward compatibility) |
+
+<Warning>
+Change `AUTH_PASS` and `API_KEY` from defaults before production deployment. These credentials provide full administrative access.
+</Warning>
+
+**Password with special characters:**
+
+If your password contains `#`, quote it or use base64 encoding:
+
+<CodeGroup>
+```bash Quoted
+AUTH_PASS="my#password"
+```
+
+```bash Base64
+AUTH_PASS_B64=$(echo -n 'my#password' | base64)
+```
+</CodeGroup>
+
+### Network Access
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PORT` | No | `3000` (Docker) / `3005` (direct) | HTTP server port |
+| `MC_ALLOWED_HOSTS` | No | `localhost,127.0.0.1` | Comma-separated host allowlist for production |
+| `MC_ALLOW_ANY_HOST` | No | `false` | Bypass host allowlist (development only) |
+| `MC_TRUSTED_PROXIES` | No | - | Comma-separated IPs for X-Forwarded-For parsing |
+
+<Info>
+In production mode, Mission Control blocks requests unless the `Host` header matches `MC_ALLOWED_HOSTS`. Use wildcards like `*.example.com` or `100.*` for Tailscale IPs.
+</Info>
+
+### OpenClaw Integration
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OPENCLAW_HOME` | No* | - | Path to `.openclaw` directory |
+| `OPENCLAW_GATEWAY_HOST` | No | `127.0.0.1` | Gateway WebSocket host |
+| `OPENCLAW_GATEWAY_PORT` | No | `18789` | Gateway WebSocket port |
+| `OPENCLAW_GATEWAY_TOKEN` | No | - | Server-side gateway auth token |
+| `NEXT_PUBLIC_GATEWAY_TOKEN` | No | - | Browser-side gateway auth token |
+| `OPENCLAW_MEMORY_DIR` | No | - | Agent memory directory (see note below) |
+
+<Note>
+`OPENCLAW_HOME` is required for memory browser, log viewer, and gateway config features. Point to your OpenClaw installation directory.
+</Note>
+
+**Memory Browser Configuration:**
+
+OpenClaw stores agent memory in workspace directories, not `$OPENCLAW_HOME/memory/`. Set `OPENCLAW_MEMORY_DIR` to your agents root:
+
+```bash
+OPENCLAW_MEMORY_DIR=/home/you/clawd-agents
+```
+
+This makes the Memory Browser show daily logs, `MEMORY.md`, and other markdown files from all agent workspaces.
+
+### Data Paths
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `MISSION_CONTROL_DATA_DIR` | No | `.data` | Data directory (database, logs) |
+| `MISSION_CONTROL_DB_PATH` | No | `.data/mission-control.db` | SQLite database path |
+| `MISSION_CONTROL_TOKENS_PATH` | No | `.data/mission-control-tokens.json` | Token usage log path |
+
+### Google OAuth (Optional)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `GOOGLE_CLIENT_ID` | No | - | Server-side Google OAuth client ID |
+| `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | No | - | Browser-side Google OAuth client ID |
+
+<Info>
+Create OAuth credentials in Google Cloud Console. Set authorized origins to your Mission Control URL and redirect URI to `https://yourdomain.com/api/auth/google`.
+</Info>
+
+### Claude Code Integration (Optional)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `MC_CLAUDE_HOME` | No | `~/.claude` | Path to Claude Code home directory |
+
+Mission Control automatically discovers Claude Code sessions from `~/.claude/projects/` and extracts token usage from JSONL transcripts.
+
+### Data Retention (Optional)
+
+Control how long Mission Control retains historical data (in days, 0 = keep forever):
+
+```bash
+MC_RETAIN_ACTIVITIES_DAYS=90
+MC_RETAIN_AUDIT_DAYS=365
+MC_RETAIN_LOGS_DAYS=30
+MC_RETAIN_NOTIFICATIONS_DAYS=60
+MC_RETAIN_PIPELINE_RUNS_DAYS=90
+MC_RETAIN_TOKEN_USAGE_DAYS=90
+```
+
+## Reverse Proxy Setup
+
+<Warning>
+Deploy Mission Control behind a reverse proxy with TLS for any network-accessible deployment. Never expose the application directly to the internet.
+</Warning>
+
+### Caddy (Recommended)
+
+Caddy automatically provisions TLS certificates via Let's Encrypt:
+
+```caddy Caddyfile
+mission-control.yourdomain.com {
+    reverse_proxy localhost:3005
+}
+```
+
+Start Caddy:
+
+```bash
+caddy run --config Caddyfile
+```
+
+### nginx
+
+Configure nginx with manual certificate management:
+
+```nginx nginx.conf
+server {
+    listen 443 ssl http2;
+    server_name mission-control.yourdomain.com;
+
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+
+    location / {
+        proxy_pass http://localhost:3005;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # WebSocket support
+    location /api/events {
+        proxy_pass http://localhost:3005;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+```
+
+If using nginx as a reverse proxy, configure trusted proxies:
+
+```bash .env
+MC_TRUSTED_PROXIES=127.0.0.1,10.0.0.0/8
+```
+
+## Troubleshooting
+
+### "Module not found: better-sqlite3"
+
+Native compilation failed. Install build tools:
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install -y python3 make g++
+
+# Then reinstall
+rm -rf node_modules
+pnpm install
+```
+
+### "Invalid ELF header" or "Mach-O" errors
+
+The native binary was compiled on a different platform. Rebuild on the target OS:
+
+```bash
+rm -rf node_modules .next
+pnpm install
+pnpm build
+```
+
+### Database locked errors
+
+Only one Mission Control instance can access the SQLite database at a time. Ensure no other processes are using `.data/mission-control.db`.
+
+### "Gateway error: origin not allowed"
+
+The gateway is rejecting connections from Mission Control. Add your dashboard URL to the gateway's allowed origins in `openclaw.json`:
+
+```json openclaw.json
+{
+  "gateway": {
+    "controlUi": {
+      "allowedOrigins": ["http://localhost:3000"]
+    }
+  }
+}
+```
+
+Restart the gateway after making changes.
+
+### "Gateway error: device identity required"
+
+Device identity signing requires a secure browser context (HTTPS or localhost). Access Mission Control over HTTPS or use `localhost` instead of `127.0.0.1`.
+
+## Development Commands
+
+Mission Control includes several development commands:
+
+```bash
+pnpm dev              # Start development server
+pnpm build            # Build for production
+pnpm start            # Start production server
+pnpm typecheck        # Run TypeScript type checking
+pnpm lint             # Run ESLint
+pnpm test             # Run Vitest unit tests
+pnpm test:watch       # Run tests in watch mode
+pnpm test:e2e         # Run Playwright E2E tests
+pnpm quality:gate     # Run all checks (lint, typecheck, test, build, e2e)
+```
+
+<Info>
+Run `pnpm quality:gate` before submitting pull requests to ensure all checks pass.
+</Info>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Register your first agent and explore the dashboard
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference">
+    Complete documentation for all 66 REST endpoints
+  </Card>
+  <Card title="Security Guide" icon="shield" href="/security">
+    Security best practices and hardening
+  </Card>
+  <Card title="Integrations" icon="plug" href="/integrations">
+    Connect OpenClaw, Claude Code, and custom agents
+  </Card>
+</CardGroup>

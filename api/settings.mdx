@@ -1,0 +1,193 @@
+---
+title: 'Settings API'
+description: 'Manage system settings and configuration'
+icon: 'gear'
+---
+
+<Warning>
+All settings endpoints require **admin** role. Unauthorized users will receive a 403 Forbidden response.
+</Warning>
+
+## Overview
+
+The Settings API allows administrators to view and modify Mission Control's system configuration including retention policies, gateway settings, and feature toggles.
+
+Settings are organized into categories:
+- **retention**: Data retention periods for activities, logs, and other records
+- **gateway**: Gateway connection configuration
+- **general**: System-wide settings including backups and cleanup
+
+## Get All Settings
+
+<CodeGroup>
+```bash cURL
+curl -X GET https://your-domain.com/api/settings \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN"
+```
+
+```javascript JavaScript
+const response = await fetch('/api/settings', {
+  credentials: 'include'
+});
+const data = await response.json();
+console.log(data.grouped); // Settings grouped by category
+```
+</CodeGroup>
+
+### Response
+
+<ResponseField name="settings" type="array">
+  Array of all setting objects
+  <ResponseField name="key" type="string" required>
+    Setting key (e.g., `retention.activities_days`)
+  </ResponseField>
+  <ResponseField name="value" type="string" required>
+    Current value
+  </ResponseField>
+  <ResponseField name="description" type="string">
+    Human-readable description
+  </ResponseField>
+  <ResponseField name="category" type="string" required>
+    Setting category (retention, gateway, general)
+  </ResponseField>
+  <ResponseField name="updated_by" type="string">
+    Username of last modifier
+  </ResponseField>
+  <ResponseField name="updated_at" type="integer">
+    Unix timestamp of last update
+  </ResponseField>
+  <ResponseField name="is_default" type="boolean" required>
+    Whether this setting is at its default value
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="grouped" type="object">
+  Settings organized by category for easier navigation
+</ResponseField>
+
+### Available Settings
+
+#### Retention Settings
+- `retention.activities_days` - Days to keep activity records (default: 90)
+- `retention.audit_log_days` - Days to keep audit log entries (default: 180)
+- `retention.logs_days` - Days to keep log files (default: 30)
+- `retention.notifications_days` - Days to keep notifications (default: 30)
+- `retention.pipeline_runs_days` - Days to keep pipeline run history (default: 90)
+- `retention.token_usage_days` - Days to keep token usage data (default: 90)
+
+#### Gateway Settings
+- `gateway.host` - Gateway hostname
+- `gateway.port` - Gateway port number
+
+#### General Settings
+- `general.site_name` - Mission Control display name (default: "Mission Control")
+- `general.auto_cleanup` - Enable automatic data cleanup (default: false)
+- `general.auto_backup` - Enable automatic daily backups (default: false)
+- `general.backup_retention_count` - Number of backup files to keep (default: 10)
+
+## Update Settings
+
+<CodeGroup>
+```bash cURL
+curl -X PUT https://your-domain.com/api/settings \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "settings": {
+      "retention.activities_days": "60",
+      "general.auto_backup": "true",
+      "general.backup_retention_count": "15"
+    }
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('/api/settings', {
+  method: 'PUT',
+  credentials: 'include',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    settings: {
+      'retention.activities_days': '60',
+      'general.auto_backup': 'true'
+    }
+  })
+});
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="settings" type="object" required>
+  Map of setting keys to new values. All values should be strings.
+</ParamField>
+
+### Response
+
+<ResponseField name="updated" type="array">
+  Array of setting keys that were updated
+</ResponseField>
+
+<ResponseField name="count" type="integer">
+  Number of settings updated
+</ResponseField>
+
+<Warning>
+Changes are logged to the audit trail with before/after values.
+</Warning>
+
+## Reset Setting to Default
+
+Delete a custom setting value to restore its default.
+
+<CodeGroup>
+```bash cURL
+curl -X DELETE https://your-domain.com/api/settings \
+  -H "Cookie: mc-session=YOUR_SESSION_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"key": "retention.activities_days"}'
+```
+
+```javascript JavaScript
+const response = await fetch('/api/settings', {
+  method: 'DELETE',
+  credentials: 'include',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ key: 'retention.activities_days' })
+});
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="key" type="string" required>
+  Setting key to reset (e.g., `retention.activities_days`)
+</ParamField>
+
+### Response
+
+<ResponseField name="reset" type="string">
+  The key that was reset
+</ResponseField>
+
+<ResponseField name="default_value" type="string">
+  The default value that will now be used
+</ResponseField>
+
+## Error Responses
+
+<ResponseField name="401 Unauthorized">
+  User is not authenticated. Check session cookie.
+</ResponseField>
+
+<ResponseField name="403 Forbidden">
+  User does not have admin role. Only admins can manage settings.
+</ResponseField>
+
+<ResponseField name="404 Not Found">
+  Setting not found (DELETE only)
+</ResponseField>
+
+<ResponseField name="429 Too Many Requests">
+  Rate limit exceeded. Wait before retrying.
+</ResponseField>

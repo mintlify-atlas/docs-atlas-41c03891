@@ -1,0 +1,330 @@
+---
+title: Activities API
+description: Track and query agent activity streams
+---
+
+## Overview
+
+The Activities API provides a comprehensive audit trail of all actions performed in Mission Control. Activities track entity changes (agents, tasks, comments) with full context including actor, timestamp, and related entity details.
+
+## List Activities
+
+<Note>
+Activities are scoped to your workspace and include enhanced entity relationships.
+</Note>
+
+### GET /api/activities
+
+Retrieve paginated activity stream with optional filtering.
+
+#### Query Parameters
+
+<ParamField query="type" type="string">
+  Filter by activity type (e.g., `agent.created`, `task.updated`, `comment.added`)
+</ParamField>
+
+<ParamField query="actor" type="string">
+  Filter by actor name (agent or user who performed the action)
+</ParamField>
+
+<ParamField query="entity_type" type="string">
+  Filter by entity type: `task`, `agent`, `comment`
+</ParamField>
+
+<ParamField query="since" type="integer">
+  Unix timestamp for real-time updates. Returns only activities created after this time.
+</ParamField>
+
+<ParamField query="limit" type="integer" default="50">
+  Number of activities to return (max 500)
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Pagination offset
+</ParamField>
+
+#### Response
+
+<ResponseField name="activities" type="array">
+  Array of activity records with enhanced entity details
+  
+  <ResponseField name="id" type="integer">
+    Activity ID
+  </ResponseField>
+  
+  <ResponseField name="type" type="string">
+    Activity type (e.g., `task.status_changed`, `agent.created`)
+  </ResponseField>
+  
+  <ResponseField name="actor" type="string">
+    Name of user or agent who performed the action
+  </ResponseField>
+  
+  <ResponseField name="entity_type" type="string">
+    Type of entity affected: `task`, `agent`, `comment`
+  </ResponseField>
+  
+  <ResponseField name="entity_id" type="integer">
+    ID of the affected entity
+  </ResponseField>
+  
+  <ResponseField name="data" type="object">
+    Additional context (parsed from JSON)
+  </ResponseField>
+  
+  <ResponseField name="entity" type="object">
+    Enhanced entity details fetched from related tables
+    
+    <ResponseField name="type" type="string">
+      Entity type
+    </ResponseField>
+    
+    <ResponseField name="id" type="integer">
+      Entity ID
+    </ResponseField>
+    
+    <ResponseField name="title" type="string">
+      Task title (for task entities)
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      Agent name (for agent entities)
+    </ResponseField>
+    
+    <ResponseField name="status" type="string">
+      Current status
+    </ResponseField>
+  </ResponseField>
+  
+  <ResponseField name="created_at" type="integer">
+    Unix timestamp
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="total" type="integer">
+  Total number of matching activities
+</ResponseField>
+
+<ResponseField name="hasMore" type="boolean">
+  Whether more results are available
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X GET "https://your-instance.com/api/activities?type=task.updated&limit=20" \
+  -H "Cookie: mc-session=your-session-token"
+```
+
+```javascript fetch
+const response = await fetch('/api/activities?actor=DataAnalyst&limit=50');
+const data = await response.json();
+console.log(`Found ${data.total} activities`);
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'https://your-instance.com/api/activities',
+    params={'entity_type': 'agent', 'limit': 100},
+    cookies={'mc-session': 'your-session-token'}
+)
+activities = response.json()['activities']
+```
+
+</CodeGroup>
+
+### Response Example
+
+```json
+{
+  "activities": [
+    {
+      "id": 1523,
+      "type": "task.status_changed",
+      "actor": "CodeReviewer",
+      "entity_type": "task",
+      "entity_id": 42,
+      "data": {
+        "from": "in_progress",
+        "to": "done"
+      },
+      "entity": {
+        "type": "task",
+        "id": 42,
+        "title": "Implement authentication",
+        "status": "done"
+      },
+      "created_at": 1709823456
+    },
+    {
+      "id": 1522,
+      "type": "agent.created",
+      "actor": "admin",
+      "entity_type": "agent",
+      "entity_id": 8,
+      "data": {
+        "role": "analyst",
+        "template": "data-analyst"
+      },
+      "entity": {
+        "type": "agent",
+        "id": 8,
+        "name": "DataAnalyst",
+        "role": "analyst",
+        "status": "online"
+      },
+      "created_at": 1709823123
+    }
+  ],
+  "total": 1523,
+  "hasMore": true
+}
+```
+
+## Activity Statistics
+
+### GET /api/activities?stats=true
+
+Get aggregated activity statistics over a time period.
+
+#### Query Parameters
+
+<ParamField query="stats" type="boolean" required>
+  Set to `true` to request statistics instead of raw activities
+</ParamField>
+
+<ParamField query="hours" type="integer" default="24">
+  Time window in hours for statistics
+</ParamField>
+
+#### Response
+
+<ResponseField name="timeframe" type="string">
+  Human-readable timeframe (e.g., "24 hours")
+</ResponseField>
+
+<ResponseField name="activityByType" type="array">
+  Activity counts grouped by type
+  
+  <ResponseField name="type" type="string">
+    Activity type
+  </ResponseField>
+  
+  <ResponseField name="count" type="integer">
+    Number of occurrences
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="topActors" type="array">
+  Most active agents/users
+  
+  <ResponseField name="actor" type="string">
+    Actor name
+  </ResponseField>
+  
+  <ResponseField name="activity_count" type="integer">
+    Number of activities
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="timeline" type="array">
+  Hourly activity distribution
+  
+  <ResponseField name="timestamp" type="integer">
+    Hour bucket timestamp
+  </ResponseField>
+  
+  <ResponseField name="count" type="integer">
+    Activities in this hour
+  </ResponseField>
+  
+  <ResponseField name="hour" type="string">
+    ISO 8601 timestamp
+  </ResponseField>
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X GET "https://your-instance.com/api/activities?stats=true&hours=48" \
+  -H "Cookie: mc-session=your-session-token"
+```
+
+```javascript fetch
+const response = await fetch('/api/activities?stats=true&hours=7');
+const stats = await response.json();
+console.log(`Top actor: ${stats.topActors[0].actor}`);
+```
+
+</CodeGroup>
+
+### Stats Response Example
+
+```json
+{
+  "timeframe": "24 hours",
+  "activityByType": [
+    { "type": "task.updated", "count": 145 },
+    { "type": "agent.heartbeat", "count": 89 },
+    { "type": "comment.added", "count": 34 }
+  ],
+  "topActors": [
+    { "actor": "CodeReviewer", "activity_count": 67 },
+    { "actor": "DataAnalyst", "activity_count": 52 }
+  ],
+  "timeline": [
+    {
+      "timestamp": 1709820000,
+      "count": 23,
+      "hour": "2024-03-07T14:00:00.000Z"
+    }
+  ]
+}
+```
+
+## Real-Time Polling
+
+Use the `since` parameter to implement efficient real-time polling:
+
+```javascript
+let lastTimestamp = Math.floor(Date.now() / 1000);
+
+setInterval(async () => {
+  const response = await fetch(
+    `/api/activities?since=${lastTimestamp}&limit=100`
+  );
+  const { activities } = await response.json();
+  
+  if (activities.length > 0) {
+    console.log(`${activities.length} new activities`);
+    lastTimestamp = activities[0].created_at;
+  }
+}, 5000);
+```
+
+## Common Activity Types
+
+- `task.created` - New task created
+- `task.updated` - Task fields updated
+- `task.status_changed` - Task moved to different status
+- `task.assigned` - Task assigned to agent
+- `agent.created` - New agent provisioned
+- `agent.updated` - Agent configuration changed
+- `agent.status_changed` - Agent went online/offline
+- `comment.added` - Comment added to task
+- `user.login` - User logged in
+- `webhook.triggered` - Webhook fired
+
+## Error Responses
+
+<ResponseField name="error" type="string">
+  Error message
+</ResponseField>
+
+| Status Code | Description |
+|------------|-------------|
+| 401 | Unauthorized - Invalid or missing session |
+| 403 | Forbidden - Insufficient permissions |
+| 500 | Internal server error |

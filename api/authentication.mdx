@@ -1,0 +1,601 @@
+---
+title: Authentication
+description: Session cookies, API keys, and OAuth with role-based access control
+---
+
+## Overview
+
+Mission Control supports three authentication methods:
+
+1. **Session Cookie** - For browser-based access after login
+2. **API Key** - For headless automation and CLI tools
+3. **Google OAuth** - For team SSO with admin approval workflow
+
+All authenticated users are assigned one of three roles: `viewer`, `operator`, or `admin`.
+
+## Authentication Methods
+
+<Tabs>
+  <Tab title="Session Cookie">
+    ### Session Cookie Authentication
+    
+    Session cookies are set after successful login and valid for 7 days.
+    
+    #### Login
+    
+    ```bash
+    curl -X POST http://localhost:3000/api/auth/login \
+      -H "Content-Type: application/json" \
+      -d '{
+        "username": "admin",
+        "password": "your-secure-password"
+      }'
+    ```
+    
+    **Response**:
+    
+    ```json
+    {
+      "user": {
+        "id": 1,
+        "username": "admin",
+        "display_name": "Administrator",
+        "role": "admin",
+        "provider": "local",
+        "created_at": 1709587200,
+        "last_login_at": 1709673600
+      }
+    }
+    ```
+    
+    **Headers**:
+    
+    ```
+    Set-Cookie: mc-session=a1b2c3d4e5f6...; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800
+    ```
+    
+    <Note>
+    The `mc-session` cookie is HttpOnly and cannot be accessed via JavaScript for security.
+    </Note>
+    
+    #### Using the Session
+    
+    Include the cookie in subsequent requests:
+    
+    ```bash
+    curl http://localhost:3000/api/agents \
+      -H "Cookie: mc-session=a1b2c3d4e5f6..."
+    ```
+    
+    #### Logout
+    
+    ```bash
+    curl -X POST http://localhost:3000/api/auth/logout \
+      -H "Cookie: mc-session=a1b2c3d4e5f6..."
+    ```
+  </Tab>
+  
+  <Tab title="API Key">
+    ### API Key Authentication
+    
+    API keys are for headless automation, CLI tools, and service-to-service communication.
+    
+    #### Setting Up
+    
+    Configure your API key in `.env`:
+    
+    ```bash
+    API_KEY=mc_live_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6
+    ```
+    
+    <Warning>
+    Generate a strong random key (at least 32 characters). Never commit API keys to version control.
+    </Warning>
+    
+    #### Using API Keys
+    
+    Pass the key in the `x-api-key` header:
+    
+    ```bash
+    curl http://localhost:3000/api/agents \
+      -H "x-api-key: mc_live_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"
+    ```
+    
+    #### Permissions
+    
+    API key authentication grants **admin-level access** to all endpoints.
+    
+    ```json
+    {
+      "id": 0,
+      "username": "api",
+      "display_name": "API Access",
+      "role": "admin"
+    }
+    ```
+    
+    <Note>
+    API keys bypass CSRF checks since they're sent in headers, not cookies.
+    </Note>
+  </Tab>
+  
+  <Tab title="Google OAuth">
+    ### Google OAuth
+    
+    Google Sign-In with admin approval workflow for team access.
+    
+    #### Setup
+    
+    1. Create OAuth credentials in Google Cloud Console
+    2. Configure redirect URI: `https://your-domain.com/api/auth/google`
+    3. Add credentials to `.env`:
+    
+    ```bash
+    GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+    GOOGLE_CLIENT_SECRET=your-client-secret
+    ```
+    
+    #### OAuth Flow
+    
+    <Steps>
+      <Step title="User clicks 'Sign in with Google'">
+        Browser redirects to Google's OAuth consent screen
+      </Step>
+      
+      <Step title="User grants permission">
+        Google redirects back to `/api/auth/google?code=...&state=...`
+      </Step>
+      
+      <Step title="Server exchanges code for tokens">
+        Mission Control validates the code and creates a pending access request
+      </Step>
+      
+      <Step title="Admin approves request">
+        Admin reviews the request in the dashboard and assigns a role
+      </Step>
+      
+      <Step title="User can log in">
+        User is notified and can access the dashboard
+      </Step>
+    </Steps>
+    
+    #### Callback Endpoint
+    
+    ```
+    GET /api/auth/google?code=...&state=...
+    ```
+    
+    **Response**: `302` redirect to dashboard or access request page
+    
+    #### Managing Access Requests
+    
+    List pending requests (admin only):
+    
+    ```bash
+    curl http://localhost:3000/api/auth/access-requests \
+      -H "x-api-key: your-api-key"
+    ```
+    
+    **Response**:
+    
+    ```json
+    {
+      "requests": [
+        {
+          "id": 1,
+          "username": "alice@example.com",
+          "email": "alice@example.com",
+          "reason": "Need access to monitor agents",
+          "status": "pending",
+          "created_at": 1709587200
+        }
+      ]
+    }
+    ```
+    
+    Approve a request:
+    
+    ```bash
+    curl -X POST http://localhost:3000/api/auth/access-requests \
+      -H "Content-Type: application/json" \
+      -H "x-api-key: your-api-key" \
+      -d '{
+        "id": 1,
+        "action": "approve",
+        "role": "operator"
+      }'
+    ```
+  </Tab>
+</Tabs>
+
+## Role-Based Access Control (RBAC)
+
+Mission Control enforces three permission levels:
+
+<CodeGroup>
+```json Viewer
+{
+  "role": "viewer",
+  "permissions": [
+    "Read agents",
+    "Read tasks",
+    "Read token usage",
+    "Read logs and activities",
+    "Read system status"
+  ],
+  "restrictions": [
+    "Cannot create or modify resources",
+    "Cannot access admin settings",
+    "Cannot manage users"
+  ]
+}
+```
+
+```json Operator
+{
+  "role": "operator",
+  "permissions": [
+    "All viewer permissions",
+    "Create and update agents",
+    "Create and update tasks",
+    "Send messages to agents",
+    "Record token usage",
+    "Trigger agent heartbeats",
+    "Broadcast tasks to agents"
+  ],
+  "restrictions": [
+    "Cannot manage users",
+    "Cannot access admin settings",
+    "Cannot delete resources (except own tasks)"
+  ]
+}
+```
+
+```json Admin
+{
+  "role": "admin",
+  "permissions": [
+    "All operator permissions",
+    "Create, update, delete users",
+    "Manage system settings",
+    "Configure webhooks and alerts",
+    "Manage gateway connections",
+    "Access audit logs",
+    "Perform database backups",
+    "Delete any resource"
+  ]
+}
+```
+</CodeGroup>
+
+### Role Hierarchy
+
+Roles are hierarchical: `viewer < operator < admin`
+
+```typescript
+const ROLE_LEVELS = {
+  viewer: 0,
+  operator: 1,
+  admin: 2
+};
+```
+
+Endpoints specify minimum required role. For example, `POST /api/agents` requires `operator` or higher.
+
+## Security Considerations
+
+<Warning>
+Follow these security best practices before deploying to production:
+</Warning>
+
+### Password Requirements
+
+- Minimum 12 characters
+- Hashed with scrypt (CPU-intensive key derivation)
+- Constant-time comparison to prevent timing attacks
+
+```typescript
+// From auth.ts:208
+if (password.length < 12) {
+  throw new Error('Password must be at least 12 characters');
+}
+```
+
+### Session Security
+
+- **Duration**: 7 days (604800 seconds)
+- **Storage**: SQLite `user_sessions` table
+- **Token**: 32-byte random hex (64 characters)
+- **Cleanup**: Expired sessions purged on each login
+
+```typescript
+// From auth.ts:80
+const SESSION_DURATION = 7 * 24 * 60 * 60; // 7 days
+const token = randomBytes(32).toString('hex');
+```
+
+### API Key Security
+
+- Constant-time comparison prevents timing attacks
+- Never log API keys in application logs
+- Rotate keys regularly
+- Use different keys for dev/staging/production
+
+```typescript
+// From auth.ts:281
+if (apiKey && safeCompare(apiKey, process.env.API_KEY || '')) {
+  return { id: 0, username: 'api', role: 'admin' };
+}
+```
+
+### CSRF Protection
+
+Mutating requests validate the `Origin` header:
+
+```typescript
+// From proxy.ts:74-88
+if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
+  const origin = request.headers.get('origin');
+  if (origin) {
+    const originHost = new URL(origin).host;
+    const requestHost = request.headers.get('host');
+    if (originHost !== requestHost) {
+      return NextResponse.json(
+        { error: 'CSRF origin mismatch' },
+        { status: 403 }
+      );
+    }
+  }
+}
+```
+
+<Note>
+API key authentication bypasses CSRF checks since keys are header-based.
+</Note>
+
+## User Management
+
+### Get Current User
+
+```bash
+curl http://localhost:3000/api/auth/me \
+  -H "x-api-key: your-api-key"
+```
+
+**Response**:
+
+```json
+{
+  "user": {
+    "id": 1,
+    "username": "admin",
+    "display_name": "Administrator",
+    "role": "admin",
+    "workspace_id": 1,
+    "provider": "local",
+    "email": null,
+    "avatar_url": null,
+    "created_at": 1709587200,
+    "last_login_at": 1709673600
+  }
+}
+```
+
+### List Users (Admin)
+
+```bash
+curl http://localhost:3000/api/auth/users \
+  -H "x-api-key: your-api-key"
+```
+
+**Response**:
+
+```json
+{
+  "users": [
+    {
+      "id": 1,
+      "username": "admin",
+      "display_name": "Administrator",
+      "role": "admin",
+      "created_at": 1709587200
+    },
+    {
+      "id": 2,
+      "username": "operator1",
+      "display_name": "Agent Operator",
+      "role": "operator",
+      "created_at": 1709673600
+    }
+  ]
+}
+```
+
+### Create User (Admin)
+
+```bash
+curl -X POST http://localhost:3000/api/auth/users \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "username": "analyst",
+    "password": "secure-password-min-12-chars",
+    "display_name": "Data Analyst",
+    "role": "viewer",
+    "email": "analyst@example.com"
+  }'
+```
+
+**Response**: `201 Created`
+
+```json
+{
+  "user": {
+    "id": 3,
+    "username": "analyst",
+    "display_name": "Data Analyst",
+    "role": "viewer",
+    "email": "analyst@example.com",
+    "created_at": 1709760000
+  }
+}
+```
+
+### Update User (Admin)
+
+```bash
+curl -X PUT http://localhost:3000/api/auth/users \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "id": 3,
+    "role": "operator",
+    "display_name": "Senior Data Analyst"
+  }'
+```
+
+### Delete User (Admin)
+
+```bash
+curl -X DELETE http://localhost:3000/api/auth/users \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{"id": 3}'
+```
+
+<Warning>
+Deleting a user destroys all their sessions immediately.
+</Warning>
+
+## Error Responses
+
+### 401 Unauthorized
+
+Authentication required but not provided:
+
+```json
+{
+  "error": "Authentication required"
+}
+```
+
+**Causes**:
+- No session cookie or API key provided
+- Session expired (7 days)
+- Invalid API key
+
+### 403 Forbidden
+
+Authenticated but insufficient permissions:
+
+```json
+{
+  "error": "Requires admin role or higher"
+}
+```
+
+**Causes**:
+- Viewer trying to create resources
+- Operator trying to manage users
+- OAuth user not yet approved
+
+### 409 Conflict
+
+Resource already exists:
+
+```json
+{
+  "error": "Username already exists"
+}
+```
+
+## Initial Setup
+
+On first run, Mission Control seeds an admin user from environment variables:
+
+```bash
+# .env
+AUTH_USER=admin
+AUTH_PASS=your-secure-password
+
+# Or use base64 if password contains special characters
+AUTH_PASS_B64=eW91ci1zZWN1cmUtcGFzc3dvcmQ=
+```
+
+<Note>
+If `AUTH_PASS` contains `#` or other shell metacharacters, use quotes or switch to `AUTH_PASS_B64`.
+</Note>
+
+### Generating a Secure Password
+
+```bash
+# Generate 24-character random password
+openssl rand -base64 24
+
+# For base64 encoding
+echo -n "your-password" | base64
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Use Strong Credentials">
+    - Passwords: Minimum 12 characters, mix of letters/numbers/symbols
+    - API keys: At least 32 random characters
+    - Rotate API keys quarterly
+  </Step>
+  
+  <Step title="Deploy Behind Reverse Proxy">
+    Use Caddy, nginx, or Traefik with automatic TLS:
+    
+    ```nginx
+    server {
+      listen 443 ssl http2;
+      server_name mission-control.example.com;
+      
+      ssl_certificate /path/to/cert.pem;
+      ssl_certificate_key /path/to/key.pem;
+      
+      location / {
+        proxy_pass http://localhost:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+      }
+    }
+    ```
+  </Step>
+  
+  <Step title="Configure Host Allowlist">
+    Restrict network access in production:
+    
+    ```bash
+    MC_ALLOWED_HOSTS=mission-control.example.com,*.internal.corp
+    ```
+  </Step>
+  
+  <Step title="Enable Audit Logging">
+    Track administrative actions:
+    
+    ```bash
+    curl http://localhost:3000/api/audit \
+      -H "x-api-key: your-api-key"
+    ```
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Agents API" icon="robot" href="/api/agents">
+    Manage agent lifecycle and status
+  </Card>
+  <Card title="Tasks API" icon="list-check" href="/api/tasks">
+    Create and assign tasks to agents
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/api/webhooks">
+    Configure outbound event notifications
+  </Card>
+  <Card title="Token Tracking" icon="coins" href="/api/tokens">
+    Monitor LLM token usage and costs
+  </Card>
+</CardGroup>

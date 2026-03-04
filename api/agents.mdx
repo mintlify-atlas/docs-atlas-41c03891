@@ -1,0 +1,799 @@
+---
+title: 'Agents API'
+description: 'Manage AI agents including lifecycle, configuration, communication, and status'
+icon: 'robot'
+---
+
+## Overview
+
+The Agents API provides complete control over AI agent lifecycle, configuration, and orchestration. Agents represent autonomous AI workers that can execute tasks, communicate with each other, and maintain persistent state.
+
+## Authentication
+
+All agent endpoints require authentication via:
+- **Session Cookie**: `mc-session` (set after login)
+- **API Key**: `x-api-key` header
+
+Minimum role requirements vary by endpoint (viewer, operator, or admin).
+
+---
+
+## List Agents
+
+<Card title="GET /api/agents" icon="list">
+Retrieve a paginated list of agents with optional filtering by status and role.
+</Card>
+
+**Authorization:** Viewer role required
+
+### Query Parameters
+
+<ParamField query="status" type="string">
+  Filter by agent status
+  <Expandable title="Allowed values">
+    - `online` - Agent is active and available
+    - `offline` - Agent is not running
+    - `busy` - Agent is executing a task
+    - `idle` - Agent is online but inactive
+    - `error` - Agent encountered an error
+  </Expandable>
+</ParamField>
+
+<ParamField query="role" type="string">
+  Filter by agent role (e.g., "developer", "analyst", "qa")
+</ParamField>
+
+<ParamField query="limit" type="integer" default="50">
+  Maximum number of agents to return (max: 200)
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of agents to skip for pagination
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="agents" type="array">
+  Array of agent objects
+  <Expandable title="Agent Object">
+    <ResponseField name="id" type="integer">
+      Unique agent identifier
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      Agent display name
+    </ResponseField>
+    <ResponseField name="role" type="string">
+      Agent role or specialty
+    </ResponseField>
+    <ResponseField name="status" type="string">
+      Current agent status (online, offline, busy, idle, error)
+    </ResponseField>
+    <ResponseField name="session_key" type="string">
+      Gateway session identifier
+    </ResponseField>
+    <ResponseField name="soul_content" type="string">
+      Agent personality and instruction configuration
+    </ResponseField>
+    <ResponseField name="config" type="object">
+      Agent configuration including model, tools, sandbox settings
+    </ResponseField>
+    <ResponseField name="last_seen" type="integer">
+      Unix timestamp of last heartbeat
+    </ResponseField>
+    <ResponseField name="created_at" type="integer">
+      Unix timestamp of agent creation
+    </ResponseField>
+    <ResponseField name="updated_at" type="integer">
+      Unix timestamp of last update
+    </ResponseField>
+    <ResponseField name="taskStats" type="object">
+      Task statistics for this agent
+      <Expandable title="Task Stats">
+        <ResponseField name="total" type="integer">Total tasks</ResponseField>
+        <ResponseField name="assigned" type="integer">Assigned tasks</ResponseField>
+        <ResponseField name="in_progress" type="integer">Tasks in progress</ResponseField>
+        <ResponseField name="completed" type="integer">Completed tasks</ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="total" type="integer">
+  Total number of agents matching filters
+</ResponseField>
+
+<ResponseField name="page" type="integer">
+  Current page number
+</ResponseField>
+
+<ResponseField name="limit" type="integer">
+  Number of agents per page
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://your-domain.com/api/agents?status=online&limit=10" \
+  -H "x-api-key: your-api-key"
+```
+
+```javascript JavaScript
+const response = await fetch('/api/agents?status=online&limit=10', {
+  headers: {
+    'x-api-key': 'your-api-key'
+  }
+});
+const data = await response.json();
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'https://your-domain.com/api/agents',
+    params={'status': 'online', 'limit': 10},
+    headers={'x-api-key': 'your-api-key'}
+)
+agents = response.json()
+```
+</CodeGroup>
+
+### Example Response
+
+```json
+{
+  "agents": [
+    {
+      "id": 1,
+      "name": "code-reviewer",
+      "role": "qa",
+      "status": "online",
+      "session_key": "session-abc123",
+      "config": {
+        "model": "claude-sonnet-4",
+        "tools": ["bash", "read", "edit"]
+      },
+      "last_seen": 1709856000,
+      "created_at": 1709000000,
+      "updated_at": 1709856000,
+      "taskStats": {
+        "total": 45,
+        "assigned": 2,
+        "in_progress": 1,
+        "completed": 42
+      }
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "limit": 10
+}
+```
+
+### Error Responses
+
+<ResponseField name="401 Unauthorized">
+  Authentication required or invalid credentials
+</ResponseField>
+
+---
+
+## Create Agent
+
+<Card title="POST /api/agents" icon="plus">
+Create a new AI agent with specified configuration.
+</Card>
+
+**Authorization:** Operator role required
+
+**Rate Limit:** Subject to mutation rate limiting
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Unique agent name
+</ParamField>
+
+<ParamField body="role" type="string" required>
+  Agent role or specialty (e.g., "developer", "qa", "analyst")
+</ParamField>
+
+<ParamField body="session_key" type="string">
+  Gateway session key for connection
+</ParamField>
+
+<ParamField body="soul_content" type="string">
+  Agent personality and instruction configuration
+</ParamField>
+
+<ParamField body="status" type="string" default="offline">
+  Initial agent status: online, offline, busy, idle, error
+</ParamField>
+
+<ParamField body="config" type="object">
+  Agent configuration object
+  <Expandable title="Config Options">
+    - `model`: LLM model identifier (e.g., "claude-sonnet-4")
+    - `tools`: Array of enabled tools
+    - `identity`: Agent identity configuration
+    - `sandbox`: Sandbox environment settings
+    - `memorySearch`: Memory search configuration
+  </Expandable>
+</ParamField>
+
+<ParamField body="template" type="string">
+  Template identifier to initialize agent configuration
+</ParamField>
+
+<ParamField body="gateway_config" type="object">
+  Gateway-specific configuration to merge with config
+</ParamField>
+
+<ParamField body="write_to_gateway" type="boolean" default="false">
+  Whether to write agent configuration to gateway config file
+</ParamField>
+
+### Response Fields
+
+<ResponseField name="agent" type="object">
+  Created agent object with all fields (same structure as List Agents)
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://your-domain.com/api/agents" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "name": "code-reviewer",
+    "role": "qa",
+    "config": {
+      "model": "claude-sonnet-4",
+      "tools": ["bash", "read", "edit"]
+    },
+    "soul_content": "You are a meticulous code reviewer.",
+    "status": "online"
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('/api/agents', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'x-api-key': 'your-api-key'
+  },
+  body: JSON.stringify({
+    name: 'code-reviewer',
+    role: 'qa',
+    config: {
+      model: 'claude-sonnet-4',
+      tools: ['bash', 'read', 'edit']
+    },
+    soul_content: 'You are a meticulous code reviewer.',
+    status: 'online'
+  })
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+### Example Response
+
+```json
+{
+  "agent": {
+    "id": 2,
+    "name": "code-reviewer",
+    "role": "qa",
+    "status": "online",
+    "config": {
+      "model": "claude-sonnet-4",
+      "tools": ["bash", "read", "edit"]
+    },
+    "soul_content": "You are a meticulous code reviewer.",
+    "created_at": 1709856400,
+    "updated_at": 1709856400,
+    "taskStats": {
+      "total": 0,
+      "assigned": 0,
+      "in_progress": 0,
+      "completed": 0
+    }
+  }
+}
+```
+
+### Error Responses
+
+<ResponseField name="400 Bad Request">
+  Missing required fields or invalid data
+</ResponseField>
+
+<ResponseField name="401 Unauthorized">
+  Authentication required
+</ResponseField>
+
+<ResponseField name="403 Forbidden">
+  Insufficient permissions (requires operator role)
+</ResponseField>
+
+<ResponseField name="409 Conflict">
+  Agent name already exists
+</ResponseField>
+
+<ResponseField name="429 Too Many Requests">
+  Rate limit exceeded
+</ResponseField>
+
+---
+
+## Get Agent by ID
+
+<Card title="GET /api/agents/{id}" icon="eye">
+Retrieve detailed information about a specific agent.
+</Card>
+
+**Authorization:** Viewer role required
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  Agent ID
+</ParamField>
+
+### Response
+
+<ResponseField name="agent" type="object">
+  Complete agent object (same structure as List Agents)
+</ResponseField>
+
+### Example Request
+
+```bash cURL
+curl -X GET "https://your-domain.com/api/agents/1" \
+  -H "x-api-key: your-api-key"
+```
+
+### Error Responses
+
+<ResponseField name="404 Not Found">
+  Agent does not exist
+</ResponseField>
+
+---
+
+## Update Agent
+
+<Card title="PUT /api/agents" icon="pen">
+Update agent status and configuration by name.
+</Card>
+
+**Authorization:** Operator role required
+
+**Rate Limit:** Subject to mutation rate limiting
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Agent name to update
+</ParamField>
+
+<ParamField body="status" type="string">
+  New agent status
+</ParamField>
+
+<ParamField body="last_activity" type="string">
+  Last activity description
+</ParamField>
+
+<ParamField body="config" type="object">
+  Updated configuration object
+</ParamField>
+
+<ParamField body="session_key" type="string">
+  Updated session key
+</ParamField>
+
+<ParamField body="soul_content" type="string">
+  Updated soul configuration
+</ParamField>
+
+<ParamField body="role" type="string">
+  Updated role
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Whether the update was successful
+</ResponseField>
+
+### Example Request
+
+```bash cURL
+curl -X PUT "https://your-domain.com/api/agents" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "name": "code-reviewer",
+    "status": "busy",
+    "last_activity": "Reviewing pull request #123"
+  }'
+```
+
+### Error Responses
+
+<ResponseField name="400 Bad Request">
+  No fields to update or invalid data
+</ResponseField>
+
+<ResponseField name="404 Not Found">
+  Agent not found
+</ResponseField>
+
+---
+
+## Update Agent by ID
+
+<Card title="PUT /api/agents/{id}" icon="pen">
+Update agent configuration using agent ID.
+</Card>
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  Agent ID
+</ParamField>
+
+### Request Body
+
+<ParamField body="name" type="string">
+  New agent name
+</ParamField>
+
+<ParamField body="role" type="string">
+  New role
+</ParamField>
+
+<ParamField body="status" type="string">
+  New status
+</ParamField>
+
+<ParamField body="config" type="object">
+  Updated configuration
+</ParamField>
+
+<ParamField body="session_key" type="string">
+  New session key
+</ParamField>
+
+<ParamField body="soul_content" type="string">
+  Updated soul content
+</ParamField>
+
+### Response
+
+<ResponseField name="agent" type="object">
+  Updated agent object
+</ResponseField>
+
+---
+
+## Delete Agent
+
+<Card title="DELETE /api/agents/{id}" icon="trash">
+Permanently delete an agent.
+</Card>
+
+**Authorization:** Operator role required
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  Agent ID to delete
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Whether deletion was successful
+</ResponseField>
+
+### Example Request
+
+```bash cURL
+curl -X DELETE "https://your-domain.com/api/agents/1" \
+  -H "x-api-key: your-api-key"
+```
+
+---
+
+## Agent Heartbeat
+
+<Card title="GET /api/agents/{id}/heartbeat" icon="heartbeat">
+Check for pending work items (tasks and messages) assigned to an agent.
+</Card>
+
+**Authorization:** Viewer role required
+
+### Path Parameters
+
+<ParamField path="id" type="integer" required>
+  Agent ID
+</ParamField>
+
+### Response
+
+<ResponseField name="agent" type="string">
+  Agent name
+</ResponseField>
+
+<ResponseField name="pending_tasks" type="array">
+  Array of task objects assigned to this agent
+</ResponseField>
+
+<ResponseField name="messages" type="array">
+  Array of pending messages for this agent
+</ResponseField>
+
+### Example Request
+
+```bash cURL
+curl -X GET "https://your-domain.com/api/agents/1/heartbeat" \
+  -H "x-api-key: your-api-key"
+```
+
+### Example Response
+
+```json
+{
+  "agent": "code-reviewer",
+  "pending_tasks": [
+    {
+      "id": 10,
+      "title": "Review auth module",
+      "status": "assigned",
+      "priority": "high"
+    }
+  ],
+  "messages": [
+    {
+      "from": "task-manager",
+      "content": "New task assigned",
+      "type": "notification"
+    }
+  ]
+}
+```
+
+---
+
+## Trigger Heartbeat
+
+<Card title="POST /api/agents/{id}/heartbeat" icon="heartbeat">
+Manually trigger an agent heartbeat check.
+</Card>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Whether heartbeat was triggered
+</ResponseField>
+
+---
+
+## Get Agent Soul
+
+<Card title="GET /api/agents/{id}/soul" icon="brain">
+Retrieve agent's soul configuration (personality and instructions).
+</Card>
+
+### Response
+
+<ResponseField name="soul_content" type="string">
+  Agent soul configuration text
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "soul_content": "You are a meticulous code reviewer focused on security and best practices."
+}
+```
+
+---
+
+## Update Agent Soul
+
+<Card title="PUT /api/agents/{id}/soul" icon="brain">
+Update agent's soul configuration.
+</Card>
+
+**Authorization:** Operator role required
+
+### Request Body
+
+<ParamField body="soul_content" type="string" required>
+  New soul configuration
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Whether update was successful
+</ResponseField>
+
+---
+
+## Get Agent Memory
+
+<Card title="GET /api/agents/{id}/memory" icon="database">
+Retrieve agent's memory data.
+</Card>
+
+### Response
+
+<ResponseField name="memory" type="object">
+  Agent memory data structure
+</ResponseField>
+
+---
+
+## Update Agent Memory
+
+<Card title="PUT /api/agents/{id}/memory" icon="database">
+Update agent's memory data.
+</Card>
+
+**Authorization:** Operator role required
+
+### Request Body
+
+<ParamField body="memory" type="object" required>
+  New memory data
+</ParamField>
+
+---
+
+## Wake Agent
+
+<Card title="POST /api/agents/{id}/wake" icon="bell">
+Wake an idle agent and optionally provide a reason.
+</Card>
+
+**Authorization:** Operator role required
+
+### Request Body
+
+<ParamField body="reason" type="string">
+  Reason for waking the agent
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Whether agent was woken
+</ResponseField>
+
+---
+
+## Send Agent Message
+
+<Card title="POST /api/agents/message" icon="comment">
+Send a message between agents for inter-agent communication.
+</Card>
+
+**Authorization:** Operator role required
+
+### Request Body
+
+<ParamField body="from" type="string" required>
+  Sender agent name
+</ParamField>
+
+<ParamField body="to" type="string" required>
+  Recipient agent name
+</ParamField>
+
+<ParamField body="content" type="string" required>
+  Message content
+</ParamField>
+
+<ParamField body="type" type="string">
+  Message type (e.g., "notification", "request")
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Whether message was sent
+</ResponseField>
+
+<ResponseField name="id" type="integer">
+  Message ID
+</ResponseField>
+
+### Example Request
+
+```bash cURL
+curl -X POST "https://your-domain.com/api/agents/message" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "from": "task-manager",
+    "to": "code-reviewer",
+    "content": "Please review PR #123",
+    "type": "request"
+  }'
+```
+
+---
+
+## Get Agent Communications
+
+<Card title="GET /api/agents/comms" icon="comments">
+Retrieve communication history between agents.
+</Card>
+
+### Query Parameters
+
+<ParamField query="agent" type="string">
+  Filter by specific agent name
+</ParamField>
+
+<ParamField query="limit" type="integer" default="50">
+  Maximum number of messages to return
+</ParamField>
+
+### Response
+
+<ResponseField name="messages" type="array">
+  Array of message objects
+  <Expandable title="Message Object">
+    <ResponseField name="id" type="integer">Message ID</ResponseField>
+    <ResponseField name="from_agent" type="string">Sender agent</ResponseField>
+    <ResponseField name="to_agent" type="string">Recipient agent</ResponseField>
+    <ResponseField name="content" type="string">Message content</ResponseField>
+    <ResponseField name="type" type="string">Message type</ResponseField>
+    <ResponseField name="created_at" type="integer">Unix timestamp</ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## Sync Agents from Gateway
+
+<Card title="POST /api/agents/sync" icon="sync">
+Synchronize agents from gateway configuration file.
+</Card>
+
+**Authorization:** Operator role required
+
+### Response
+
+<ResponseField name="synced" type="integer">
+  Total agents synced
+</ResponseField>
+
+<ResponseField name="created" type="integer">
+  Number of new agents created
+</ResponseField>
+
+<ResponseField name="updated" type="integer">
+  Number of existing agents updated
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "synced": 5,
+  "created": 2,
+  "updated": 3
+}
+```

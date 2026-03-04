@@ -1,0 +1,306 @@
+---
+title: API Overview
+description: Mission Control REST API architecture, versioning, and base URL configuration
+---
+
+## Introduction
+
+The Mission Control API is a REST API for orchestrating AI agents, managing tasks, tracking token usage, and monitoring system health. All endpoints return JSON and follow OpenAPI 3.1.0 specifications.
+
+## Base URL
+
+The API is served from the same host as your Mission Control dashboard:
+
+```
+http://localhost:3000/api
+```
+
+For production deployments, use your configured hostname:
+
+```
+https://mission-control.example.com/api
+```
+
+<Note>
+The API uses relative URLs (`/`) in the OpenAPI specification. All endpoints are prefixed with `/api/`.
+</Note>
+
+## Architecture
+
+Mission Control is built on:
+
+- **Framework**: Next.js 16 App Router
+- **Database**: SQLite with better-sqlite3 (WAL mode)
+- **Real-time**: WebSocket + Server-Sent Events (SSE)
+- **Authentication**: Session cookies + API keys + OAuth
+- **Validation**: Zod schemas with detailed error messages
+
+### Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| Framework | Next.js 16 |
+| Language | TypeScript 5.7 |
+| Database | SQLite (WAL mode) |
+| State Management | Zustand 5 |
+| Charts | Recharts 3 |
+| Testing | Vitest + Playwright |
+
+## API Versioning
+
+<Tabs>
+  <Tab title="Current Version">
+    **Version 1.2.0**
+    
+    The current API version is `1.2.0`. Mission Control follows semantic versioning:
+    
+    - **Major**: Breaking changes to request/response formats
+    - **Minor**: New endpoints or optional parameters
+    - **Patch**: Bug fixes and security updates
+  </Tab>
+  <Tab title="Compatibility">
+    Mission Control is in active development. While the API aims for backward compatibility:
+    
+    - Database schemas may change between releases
+    - Configuration formats may evolve
+    - Review release notes before upgrading production deployments
+  </Tab>
+</Tabs>
+
+<Warning>
+Mission Control is alpha software. APIs and database schemas may change between releases. Pin your version and review migration guides when upgrading.
+</Warning>
+
+## Rate Limiting
+
+API-wide rate limiting is enforced to prevent abuse:
+
+- **Default limit**: 100 requests per minute per IP
+- **Trusted proxies**: Configure `MC_TRUSTED_PROXIES` for X-Forwarded-For parsing
+- **Rate limit headers**: Check `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
+
+### Rate Limit Response
+
+When rate limited, you'll receive:
+
+```json
+{
+  "error": "Rate limit exceeded"
+}
+```
+
+**Status code**: `429 Too Many Requests`
+
+## Request Format
+
+All `POST`, `PUT`, and `PATCH` requests must include:
+
+```http
+Content-Type: application/json
+```
+
+### Example Request
+
+```bash
+curl -X POST https://mission-control.example.com/api/agents \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "name": "researcher",
+    "role": "Research and documentation agent",
+    "status": "online"
+  }'
+```
+
+## Response Format
+
+All responses return JSON with consistent error structures.
+
+### Success Response
+
+```json
+{
+  "agent": {
+    "id": 42,
+    "name": "researcher",
+    "role": "Research and documentation agent",
+    "status": "online",
+    "created_at": 1709587200
+  }
+}
+```
+
+### Error Response
+
+```json
+{
+  "error": "Invalid request",
+  "details": [
+    "name is required",
+    "status must be one of: online, offline, busy, idle, error"
+  ]
+}
+```
+
+## HTTP Status Codes
+
+Mission Control uses standard HTTP status codes:
+
+| Code | Meaning | Description |
+|------|---------|-------------|
+| `200` | OK | Request succeeded |
+| `201` | Created | Resource created successfully |
+| `400` | Bad Request | Invalid request body or parameters |
+| `401` | Unauthorized | Authentication required |
+| `403` | Forbidden | Insufficient permissions for this operation |
+| `404` | Not Found | Resource does not exist |
+| `409` | Conflict | Resource already exists (e.g., duplicate username) |
+| `429` | Too Many Requests | Rate limit exceeded |
+| `500` | Internal Server Error | Server error (check logs) |
+
+## Pagination
+
+Endpoints that return lists support pagination:
+
+### Parameters
+
+- `limit`: Number of items per page (default: 50, max: 200)
+- `offset`: Number of items to skip (default: 0)
+
+### Example
+
+```bash
+curl "https://mission-control.example.com/api/agents?limit=20&offset=40" \
+  -H "x-api-key: your-api-key"
+```
+
+### Response
+
+```json
+{
+  "agents": [...],
+  "total": 150,
+  "page": 2,
+  "limit": 20
+}
+```
+
+## Filtering
+
+Many endpoints support query parameters for filtering:
+
+### Agents
+
+```bash
+GET /api/agents?status=online&role=researcher
+```
+
+### Tasks
+
+```bash
+GET /api/tasks?status=in_progress&priority=high&assigned_to=researcher
+```
+
+### Token Usage
+
+```bash
+GET /api/tokens?action=stats&timeframe=week
+```
+
+## CSRF Protection
+
+Mutating requests (`POST`, `PUT`, `DELETE`, `PATCH`) validate the `Origin` header:
+
+- Origin must match the request host
+- Prevents cross-site request forgery attacks
+- Session cookie authentication only
+
+<Note>
+API key authentication bypasses CSRF checks since keys are sent in headers, not cookies.
+</Note>
+
+## Network Access Control
+
+In production, Mission Control enforces host allowlists:
+
+### Environment Variables
+
+```bash
+# Allow specific hosts (comma-separated)
+MC_ALLOWED_HOSTS="mission-control.example.com,*.internal.example.com"
+
+# Or allow any host (not recommended for production)
+MC_ALLOW_ANY_HOST=1
+```
+
+### Host Patterns
+
+- `mission-control.example.com` - Exact match
+- `*.example.com` - Wildcard subdomain (matches `a.example.com`, not `example.com`)
+- `192.168.*` - IP prefix match
+
+<Warning>
+In production (`NODE_ENV=production`), access is denied by default unless explicitly allowed. Set `MC_ALLOWED_HOSTS` or deploy behind a reverse proxy.
+</Warning>
+
+## Real-time Updates
+
+Mission Control provides real-time updates via:
+
+### Server-Sent Events (SSE)
+
+```bash
+curl -N "https://mission-control.example.com/api/events" \
+  -H "x-api-key: your-api-key"
+```
+
+Receive database change events:
+
+```
+data: {"type":"agent.status","agent":"researcher","status":"busy"}
+
+data: {"type":"task.created","id":42,"title":"Document API"}
+```
+
+### WebSocket (Gateway)
+
+For OpenClaw gateway connections:
+
+```javascript
+const ws = new WebSocket('ws://localhost:18789');
+ws.send(JSON.stringify({
+  type: 'authenticate',
+  token: 'your-gateway-token'
+}));
+```
+
+## OpenAPI Specification
+
+Download the full OpenAPI 3.1.0 specification:
+
+```bash
+curl https://mission-control.example.com/api/docs > openapi.json
+```
+
+Interactive API explorer available at:
+
+```
+https://mission-control.example.com/docs
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="key" href="/api/authentication">
+    Learn about session cookies, API keys, and OAuth
+  </Card>
+  <Card title="Agents" icon="robot" href="/api/agents">
+    Manage agent lifecycle and status
+  </Card>
+  <Card title="Tasks" icon="list-check" href="/api/tasks">
+    Create and track agent tasks
+  </Card>
+  <Card title="Tokens" icon="coins" href="/api/tokens">
+    Monitor token usage and costs
+  </Card>
+</CardGroup>

@@ -1,0 +1,504 @@
+---
+title: Alerts
+description: Create alert rules to monitor agents, tasks, and system activity
+---
+
+# Alerts
+
+Alert rules allow you to monitor Mission Control entities (agents, tasks, sessions, activities) and trigger notifications when specific conditions are met. Configure automated alerts for agent failures, stuck tasks, or unusual activity patterns.
+
+---
+
+## List Alert Rules
+
+<CodeGroup>
+```bash cURL
+curl http://localhost:3000/api/alerts \
+  -H "x-api-key: YOUR_API_KEY"
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:3000/api/alerts', {
+  headers: { 'x-api-key': 'YOUR_API_KEY' }
+});
+const data = await response.json();
+```
+</CodeGroup>
+
+### Response
+
+<ResponseField name="rules" type="array">
+  Array of alert rule configurations
+
+  <ResponseField name="id" type="integer">
+    Alert rule ID
+  </ResponseField>
+
+  <ResponseField name="name" type="string">
+    Rule name
+  </ResponseField>
+
+  <ResponseField name="description" type="string">
+    Human-readable description
+  </ResponseField>
+
+  <ResponseField name="enabled" type="boolean">
+    Whether rule is active
+  </ResponseField>
+
+  <ResponseField name="entity_type" type="string">
+    Entity to monitor: `agent`, `task`, `session`, or `activity`
+  </ResponseField>
+
+  <ResponseField name="condition_field" type="string">
+    Field to evaluate (e.g., `status`, `priority`, `assigned_to`)
+  </ResponseField>
+
+  <ResponseField name="condition_operator" type="string">
+    Comparison operator: `equals`, `not_equals`, `greater_than`, `less_than`, `contains`, `count_above`, `count_below`, `age_minutes_above`
+  </ResponseField>
+
+  <ResponseField name="condition_value" type="string">
+    Value to compare against
+  </ResponseField>
+
+  <ResponseField name="action_type" type="string">
+    Action to take when triggered (default: `notification`)
+  </ResponseField>
+
+  <ResponseField name="action_config" type="object">
+    Configuration for the action (e.g., `{"recipient": "admin"}`)
+  </ResponseField>
+
+  <ResponseField name="cooldown_minutes" type="integer">
+    Minimum time between triggers (default: 60 minutes)
+  </ResponseField>
+
+  <ResponseField name="last_triggered_at" type="integer">
+    Unix timestamp of last trigger (null if never triggered)
+  </ResponseField>
+
+  <ResponseField name="trigger_count" type="integer">
+    Total number of times this rule has triggered
+  </ResponseField>
+
+  <ResponseField name="created_by" type="string">
+    Username who created the rule
+  </ResponseField>
+
+  <ResponseField name="created_at" type="integer">
+    Unix timestamp
+  </ResponseField>
+</ResponseField>
+
+---
+
+## Create Alert Rule
+
+<CodeGroup>
+```bash cURL
+curl -X POST http://localhost:3000/api/alerts \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{
+    "name": "Agent Offline Alert",
+    "description": "Alert when agents are offline",
+    "entity_type": "agent",
+    "condition_field": "status",
+    "condition_operator": "equals",
+    "condition_value": "offline",
+    "action_type": "notification",
+    "action_config": {"recipient": "ops-team"},
+    "cooldown_minutes": 30
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:3000/api/alerts', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'x-api-key': 'YOUR_API_KEY'
+  },
+  body: JSON.stringify({
+    name: 'Agent Offline Alert',
+    entity_type: 'agent',
+    condition_field: 'status',
+    condition_operator: 'equals',
+    condition_value: 'offline',
+    cooldown_minutes: 30
+  })
+});
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Rule name for identification
+</ParamField>
+
+<ParamField body="description" type="string">
+  Human-readable description of the rule
+</ParamField>
+
+<ParamField body="entity_type" type="string" required>
+  Entity to monitor:
+  - `agent` - Monitor agent status, activity
+  - `task` - Monitor task status, priority, assignments
+  - `session` - Monitor gateway sessions
+  - `activity` - Monitor activity log entries
+</ParamField>
+
+<ParamField body="condition_field" type="string" required>
+  Field to evaluate. Allowed fields per entity type:
+  - **Agent**: `status`, `role`, `name`, `last_seen`, `last_activity`
+  - **Task**: `status`, `priority`, `assigned_to`, `title`
+  - **Activity**: `type`, `actor`, `entity_type`
+</ParamField>
+
+<ParamField body="condition_operator" type="string" required>
+  Comparison operator:
+  - `equals` - Exact match
+  - `not_equals` - Not equal
+  - `greater_than` - Numeric comparison
+  - `less_than` - Numeric comparison
+  - `contains` - Substring match (case-insensitive)
+  - `count_above` - Count of matching entities exceeds value
+  - `count_below` - Count of matching entities below value
+  - `age_minutes_above` - Field timestamp older than N minutes
+</ParamField>
+
+<ParamField body="condition_value" type="string" required>
+  Value to compare against (stringified)
+</ParamField>
+
+<ParamField body="action_type" type="string" default="notification">
+  Action to take when rule triggers
+</ParamField>
+
+<ParamField body="action_config" type="object">
+  Configuration for the action. For notifications: `{"recipient": "username"}`
+</ParamField>
+
+<ParamField body="cooldown_minutes" type="integer" default={60}>
+  Minimum minutes between rule triggers (prevents spam)
+</ParamField>
+
+### Response
+
+<ResponseField name="rule" type="object">
+  Created alert rule object (see List response for schema)
+</ResponseField>
+
+---
+
+## Update Alert Rule
+
+<CodeGroup>
+```bash cURL
+curl -X PUT http://localhost:3000/api/alerts \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{
+    "id": 1,
+    "enabled": false,
+    "cooldown_minutes": 120
+  }'
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="id" type="integer" required>
+  Alert rule ID to update
+</ParamField>
+
+<ParamField body="name" type="string">
+  New rule name
+</ParamField>
+
+<ParamField body="description" type="string">
+  New description
+</ParamField>
+
+<ParamField body="enabled" type="boolean">
+  Enable or disable rule
+</ParamField>
+
+<ParamField body="entity_type" type="string">
+  Update entity type
+</ParamField>
+
+<ParamField body="condition_field" type="string">
+  Update field to monitor
+</ParamField>
+
+<ParamField body="condition_operator" type="string">
+  Update comparison operator
+</ParamField>
+
+<ParamField body="condition_value" type="string">
+  Update comparison value
+</ParamField>
+
+<ParamField body="action_type" type="string">
+  Update action type
+</ParamField>
+
+<ParamField body="action_config" type="object">
+  Update action configuration
+</ParamField>
+
+<ParamField body="cooldown_minutes" type="integer">
+  Update cooldown period
+</ParamField>
+
+---
+
+## Delete Alert Rule
+
+<CodeGroup>
+```bash cURL
+curl -X DELETE http://localhost:3000/api/alerts \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{"id": 1}'
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="id" type="integer" required>
+  Alert rule ID to delete
+</ParamField>
+
+---
+
+## Evaluate Rules Manually
+
+Trigger immediate evaluation of all enabled alert rules.
+
+<CodeGroup>
+```bash cURL
+curl -X POST http://localhost:3000/api/alerts \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{"action": "evaluate"}'
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="action" type="string" required>
+  Must be `evaluate`
+</ParamField>
+
+### Response
+
+<ResponseField name="evaluated" type="integer">
+  Number of rules evaluated
+</ResponseField>
+
+<ResponseField name="triggered" type="integer">
+  Number of rules that triggered
+</ResponseField>
+
+<ResponseField name="results" type="array">
+  <ResponseField name="rule_id" type="integer">
+    Alert rule ID
+  </ResponseField>
+
+  <ResponseField name="rule_name" type="string">
+    Rule name
+  </ResponseField>
+
+  <ResponseField name="triggered" type="boolean">
+    Whether rule triggered
+  </ResponseField>
+
+  <ResponseField name="reason" type="string">
+    Result reason (e.g., "Condition met", "In cooldown")
+  </ResponseField>
+</ResponseField>
+
+---
+
+## Rule Examples
+
+### Alert on Agent Errors
+
+```json
+{
+  "name": "Agent Error Alert",
+  "entity_type": "agent",
+  "condition_field": "status",
+  "condition_operator": "equals",
+  "condition_value": "error",
+  "action_type": "notification",
+  "action_config": {"recipient": "ops-team"},
+  "cooldown_minutes": 15
+}
+```
+
+### Alert on High Priority Tasks
+
+```json
+{
+  "name": "Critical Task Alert",
+  "entity_type": "task",
+  "condition_field": "priority",
+  "condition_operator": "equals",
+  "condition_value": "critical",
+  "action_type": "notification",
+  "cooldown_minutes": 60
+}
+```
+
+### Alert on Too Many Tasks
+
+```json
+{
+  "name": "Task Backlog Alert",
+  "entity_type": "task",
+  "condition_field": "status",
+  "condition_operator": "count_above",
+  "condition_value": "50",
+  "action_type": "notification",
+  "cooldown_minutes": 120
+}
+```
+
+### Alert on Stale Agent Activity
+
+```json
+{
+  "name": "Stale Agent Alert",
+  "entity_type": "agent",
+  "condition_field": "last_seen",
+  "condition_operator": "age_minutes_above",
+  "condition_value": "30",
+  "action_type": "notification",
+  "cooldown_minutes": 60
+}
+```
+
+### Alert on Activity Spikes
+
+```json
+{
+  "name": "High Activity Alert",
+  "entity_type": "activity",
+  "condition_field": "type",
+  "condition_operator": "count_above",
+  "condition_value": "100",
+  "action_type": "notification",
+  "cooldown_minutes": 30
+}
+```
+
+<Note>
+The `count_above` operator for activities checks the count in the **last hour** only.
+</Note>
+
+---
+
+## Condition Operators
+
+### Comparison Operators
+
+| Operator | Description | Example |
+|----------|-------------|----------|
+| `equals` | Exact match | `status = "error"` |
+| `not_equals` | Not equal | `status != "online"` |
+| `greater_than` | Numeric greater than | `priority > 5` |
+| `less_than` | Numeric less than | `estimated_hours less than 2` |
+| `contains` | Substring (case-insensitive) | `title contains "urgent"` |
+
+### Aggregate Operators
+
+| Operator | Description | Example |
+|----------|-------------|----------|
+| `count_above` | Count exceeds value | Count of offline agents > 3 |
+| `count_below` | Count below value | Count of in-progress tasks < 5 |
+| `age_minutes_above` | Field timestamp older than N minutes | `last_seen` > 30 minutes ago |
+
+---
+
+## Cooldown Behavior
+
+Cooldown prevents alert spam:
+
+1. Rule triggers → creates notification
+2. `last_triggered_at` timestamp is set
+3. Rule cannot trigger again until `cooldown_minutes` elapses
+4. During cooldown, evaluation returns `"In cooldown"`
+
+**Example**: A rule with `cooldown_minutes: 60` can only trigger once per hour, even if the condition remains true.
+
+---
+
+## Notifications
+
+When an alert rule triggers, a notification is created:
+
+```json
+{
+  "recipient": "ops-team",
+  "type": "alert",
+  "title": "Alert: Agent Error Alert",
+  "message": "Rule 'Agent Error Alert' triggered",
+  "source_type": "alert_rule",
+  "source_id": 1
+}
+```
+
+Notifications appear in:
+- `/api/notifications` endpoint
+- Real-time SSE stream (`/api/events`)
+- Mission Control dashboard UI
+
+---
+
+## Automatic Evaluation
+
+Alert rules are evaluated automatically by the scheduler:
+
+- **Frequency**: Every 5 minutes (configurable via `MC_ALERT_EVAL_INTERVAL`)
+- **Scope**: All enabled rules across all workspaces
+- **Cooldown respected**: Rules in cooldown are skipped
+
+You can also trigger manual evaluation using `POST /api/alerts` with `{"action": "evaluate"}`.
+
+---
+
+## Security Considerations
+
+- **SQL Injection Protection**: Only whitelisted columns are allowed in `condition_field`
+- **Role Requirements**:
+  - **Create/Update**: `operator` role
+  - **Delete**: `admin` role
+  - **List/Evaluate**: `viewer` role
+- **Workspace Isolation**: Rules only evaluate entities in their workspace
+
+---
+
+## Best Practices
+
+1. **Use appropriate cooldowns** - Balance responsiveness vs. noise
+2. **Test with evaluate** - Manually trigger evaluation during setup
+3. **Monitor trigger counts** - High counts may indicate misconfigured rules
+4. **Combine with webhooks** - Use alerts + webhooks for external integrations
+5. **Name descriptively** - Use clear names like "Agent Offline > 30min"
+
+---
+
+## Rate Limits
+
+- **Creation/updates**: 100 requests/minute per API key
+- **Evaluation**: Manual evaluation limited to 1 request/10 seconds
+- **Automatic evaluation**: Every 5 minutes (not user-controlled)
+
+<Warning>
+Alert rules that trigger frequently (due to low cooldown or persistent conditions) can generate many notifications. Monitor your notification volume.
+</Warning>

@@ -1,0 +1,295 @@
+---
+title: Environment Variables
+description: Complete reference for configuring Mission Control via environment variables
+---
+
+Mission Control is configured entirely through environment variables. Copy `.env.example` to `.env.local` (development) or `.env` (production) and customize as needed.
+
+## Authentication
+
+<ParamField path="AUTH_USER" type="string" default="admin" required>
+  Admin username seeded on first run (only if no users exist in the database).
+</ParamField>
+
+<ParamField path="AUTH_PASS" type="string" required>
+  Admin password for the initial user.
+  
+  <Warning>
+    If your password contains `#`, you must either:
+    - Quote the value: `AUTH_PASS="my#password"`
+    - Use base64 encoding via `AUTH_PASS_B64` instead
+  </Warning>
+</ParamField>
+
+<ParamField path="AUTH_PASS_B64" type="string">
+  Base64-encoded admin password. Overrides `AUTH_PASS` if set.
+  
+  Generate with:
+  ```bash
+  echo -n 'my#password' | base64
+  ```
+</ParamField>
+
+<ParamField path="API_KEY" type="string" required>
+  API key for headless/external access. Send via `x-api-key` header for programmatic access.
+  
+  <Note>
+    Generate a secure random key:
+    ```bash
+    openssl rand -hex 32
+    ```
+  </Note>
+</ParamField>
+
+<ParamField path="AUTH_SECRET" type="string" default="random-secret-for-legacy-cookies">
+  Secret for legacy cookie authentication (backward compatibility).
+</ParamField>
+
+## Session & Cookie Security
+
+<ParamField path="MC_COOKIE_SECURE" type="boolean">
+  Enable secure cookies (HTTPS-only). Defaults to `true` in production unless overridden.
+  
+  <Warning>
+    Always enable this in production when serving over HTTPS.
+  </Warning>
+</ParamField>
+
+<ParamField path="MC_COOKIE_SAMESITE" type="string" default="strict">
+  SameSite cookie attribute. Valid values: `strict`, `lax`, `none`.
+</ParamField>
+
+## Network Access Control
+
+Mission Control implements host-based access control to prevent unauthorized access.
+
+<ParamField path="MC_ALLOW_ANY_HOST" type="boolean" default="false">
+  Bypass host restrictions and allow any host to access the application.
+  
+  <Warning>
+    **Production:** Access is blocked by default unless the host is explicitly allowed via `MC_ALLOWED_HOSTS`.
+    
+    **Development:** All hosts are allowed by default (`NODE_ENV !== 'production'`).
+  </Warning>
+</ParamField>
+
+<ParamField path="MC_ALLOWED_HOSTS" type="string" default="localhost,127.0.0.1">
+  Comma-separated list of allowed hostnames or patterns.
+  
+  **Supported patterns:**
+  - Exact hosts: `app.example.com`
+  - Subdomains: `*.example.com` (matches `a.example.com` but not bare `example.com`)
+  - Prefix wildcard: `100.*` (useful for Tailscale IPs like `100.64.0.1`)
+  
+  **Example:**
+  ```bash
+  MC_ALLOWED_HOSTS=localhost,127.0.0.1,app.example.com,*.internal.example.com,100.*
+  ```
+</ParamField>
+
+## Google OAuth Integration
+
+<ParamField path="GOOGLE_CLIENT_ID" type="string">
+  Server-side Google OAuth client ID for Sign-In approval workflow.
+  
+  Create in [Google Cloud Console](https://console.cloud.google.com/) as a Web application and configure authorized origins/redirect URIs.
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_GOOGLE_CLIENT_ID" type="string">
+  Client-side Google OAuth client ID (exposed to browser).
+</ParamField>
+
+## OpenClaw Gateway
+
+<ParamField path="OPENCLAW_HOME" type="string">
+  Path to `.openclaw` home directory. Required for memory browser, gateway config, and logs.
+  
+  **Example:** `/home/user/.openclaw`
+</ParamField>
+
+<ParamField path="OPENCLAW_CONFIG_PATH" type="string">
+  Explicitly point to `openclaw.json` instead of deriving from `OPENCLAW_HOME`.
+</ParamField>
+
+<ParamField path="OPENCLAW_GATEWAY_HOST" type="string" default="127.0.0.1">
+  Gateway host for server-side connections.
+</ParamField>
+
+<ParamField path="OPENCLAW_GATEWAY_PORT" type="number" default="18789">
+  Gateway port for server-side connections.
+</ParamField>
+
+<ParamField path="OPENCLAW_GATEWAY_TOKEN" type="string">
+  Authentication token for server-side gateway calls (optional).
+</ParamField>
+
+### Frontend Gateway Configuration
+
+These variables are prefixed with `NEXT_PUBLIC_` and are exposed to the browser.
+
+<ParamField path="NEXT_PUBLIC_GATEWAY_HOST" type="string">
+  Gateway hostname for browser WebSocket connections.
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_GATEWAY_PORT" type="number" default="18789">
+  Gateway port for browser WebSocket connections.
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_GATEWAY_PROTOCOL" type="string">
+  WebSocket protocol: `ws` or `wss`. Defaults based on page protocol.
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_GATEWAY_URL" type="string">
+  Complete gateway WebSocket URL. Overrides individual host/port/protocol settings.
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_GATEWAY_TOKEN" type="string">
+  Client-side gateway authentication token (if required by gateway).
+</ParamField>
+
+## Coordinator Identity
+
+<ParamField path="MC_COORDINATOR_AGENT" type="string" default="coordinator">
+  Server-side coordinator agent identifier for chat status replies.
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_COORDINATOR_AGENT" type="string" default="coordinator">
+  Client-side coordinator agent identifier for UI.
+</ParamField>
+
+## Gateway Defaults
+
+<ParamField path="MC_DEFAULT_GATEWAY_NAME" type="string" default="primary">
+  Default gateway name used for `/api/gateways` seeding if database is empty.
+</ParamField>
+
+## Data Paths
+
+All paths default to `.data/` in the project root if not specified.
+
+<ParamField path="MISSION_CONTROL_DATA_DIR" type="string" default=".data">
+  Root directory for all Mission Control data files.
+</ParamField>
+
+<ParamField path="MISSION_CONTROL_DB_PATH" type="string" default=".data/mission-control.db">
+  SQLite database file path.
+</ParamField>
+
+<ParamField path="MISSION_CONTROL_TOKENS_PATH" type="string" default=".data/mission-control-tokens.json">
+  Token storage file path.
+</ParamField>
+
+## OpenClaw Paths
+
+These paths are derived from `OPENCLAW_HOME` if not explicitly set.
+
+<ParamField path="OPENCLAW_LOG_DIR" type="string">
+  Directory containing OpenClaw logs.
+  
+  **Default:** `{OPENCLAW_HOME}/logs`
+</ParamField>
+
+<ParamField path="OPENCLAW_MEMORY_DIR" type="string">
+  Directory containing agent memory files.
+  
+  <Note>
+    OpenClaw does NOT store agent memory markdown files under `OPENCLAW_HOME/memory/` by default.
+    
+    Agent memory lives in each agent's workspace (e.g., `~/clawd-agents/{agent}/memory/`).
+    
+    Point this at your agents root to make the Memory Browser useful:
+    ```bash
+    OPENCLAW_MEMORY_DIR=/home/you/clawd-agents
+    ```
+  </Note>
+</ParamField>
+
+<ParamField path="OPENCLAW_SOUL_TEMPLATES_DIR" type="string">
+  Directory containing soul templates.
+  
+  **Default:** `{OPENCLAW_HOME}/templates/souls`
+</ParamField>
+
+<ParamField path="OPENCLAW_BIN" type="string" default="openclaw">
+  OpenClaw CLI binary name or path.
+</ParamField>
+
+## 1Password Integration
+
+<ParamField path="OP_VAULT_NAME" type="string" default="default">
+  Vault name for 1Password CLI pulls (used by Integrations panel).
+</ParamField>
+
+## Super Admin / Provisioning
+
+These variables are only required if using super-admin provisioning helpers.
+
+<ParamField path="MISSION_CONTROL_REPO_ROOT" type="string">
+  Path to the Mission Control repository root.
+</ParamField>
+
+<ParamField path="MC_SUPER_TEMPLATE_OPENCLAW_JSON" type="string">
+  Path to template `openclaw.json` used to seed new tenant state (required for tenant bootstrap).
+</ParamField>
+
+<ParamField path="MC_TENANT_HOME_ROOT" type="string" default="/home">
+  Base path for provisioned Linux user homes.
+</ParamField>
+
+<ParamField path="MC_TENANT_WORKSPACE_DIRNAME" type="string" default="workspace">
+  Workspace directory name under each tenant user home.
+</ParamField>
+
+## Data Retention
+
+All retention periods are in days. Set to `0` to keep data forever.
+
+<ParamField path="MC_RETAIN_ACTIVITIES_DAYS" type="number" default="90">
+  Activity log retention period.
+</ParamField>
+
+<ParamField path="MC_RETAIN_AUDIT_DAYS" type="number" default="365">
+  Audit log retention period.
+</ParamField>
+
+<ParamField path="MC_RETAIN_LOGS_DAYS" type="number" default="30">
+  Application log retention period.
+</ParamField>
+
+<ParamField path="MC_RETAIN_NOTIFICATIONS_DAYS" type="number" default="60">
+  Notification retention period.
+</ParamField>
+
+<ParamField path="MC_RETAIN_PIPELINE_RUNS_DAYS" type="number" default="90">
+  Pipeline run history retention period.
+</ParamField>
+
+<ParamField path="MC_RETAIN_TOKEN_USAGE_DAYS" type="number" default="90">
+  Token usage statistics retention period.
+</ParamField>
+
+## Server Configuration
+
+<ParamField path="PORT" type="number" default="3005 (direct) / 3000 (Docker)">
+  HTTP server port.
+  
+  **Example:**
+  ```bash
+  PORT=8080 pnpm start
+  ```
+</ParamField>
+
+<ParamField path="HOSTNAME" type="string" default="0.0.0.0">
+  Bind address for the HTTP server. Set in Dockerfile for containerized deployments.
+</ParamField>
+
+<ParamField path="NODE_ENV" type="string" default="development">
+  Node.js environment. Set to `production` for production deployments.
+  
+  <Warning>
+    Production mode enables:
+    - Default-deny host access control
+    - Secure cookies by default
+    - Security headers (X-Frame-Options, CSP, etc.)
+  </Warning>
+</ParamField>

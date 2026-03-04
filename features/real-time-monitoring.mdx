@@ -1,0 +1,487 @@
+---
+title: Real-Time Monitoring
+description: Live activity feeds, session tracking, and log streaming with WebSocket and Server-Sent Events
+icon: chart-line
+---
+
+## Overview
+
+Mission Control provides real-time visibility into agent activity through three complementary systems: **Activity Feed**, **Live Sessions**, and **Log Viewer**. Updates arrive via WebSocket (gateway) and Server-Sent Events (database changes) with smart polling fallback.
+
+<Note>
+Real-time monitoring requires either a connected gateway (WebSocket) or an active SSE stream. Both pause polling to reduce server load.
+</Note>
+
+## Activity Feed
+
+The Activity Feed is a chronological stream of all system events.
+
+### Accessing the Feed
+
+<Steps>
+  <Step title="Open Activity Panel">
+    Click **Activity** in the left navigation rail.
+  </Step>
+  <Step title="View Live Stream">
+    Events appear instantly as they occur. A pulsing green indicator shows live status.
+  </Step>
+  <Step title="Filter Events">
+    Use the filter bar to narrow by activity type, actor, or limit.
+  </Step>
+</Steps>
+
+### Event Types
+
+The feed tracks 9+ event types:
+
+<Tabs>
+  <Tab title="Task Events">
+    - **task_created** — New task added
+    - **task_updated** — Task status or details changed
+    - **task_deleted** — Task removed
+    - **assignment** — Task assigned to agent
+  </Tab>
+  <Tab title="Agent Events">
+    - **agent_created** — New agent registered
+    - **agent_status_change** — Agent status updated (idle/busy/offline/error)
+  </Tab>
+  <Tab title="Communication Events">
+    - **comment_added** — Comment posted on a task
+    - **mention** — User or agent mentioned in content
+  </Tab>
+  <Tab title="System Events">
+    - **standup_generated** — Daily standup report created
+  </Tab>
+</Tabs>
+
+### Activity Card Structure
+
+Each activity displays:
+
+1. **Icon** — Color-coded symbol for event type (e.g., `+` for created, `~` for updated)
+2. **Actor** — Who triggered the event (agent name or "system")
+3. **Description** — Human-readable event summary
+4. **Entity Details** — Task title, agent name, or related object info
+5. **Timestamp** — Relative time ("5m ago", "2h ago")
+6. **Additional Data** — Expandable JSON details (click "Show details")
+
+### Filtering
+
+Narrow the feed using filter controls:
+
+<Accordion title="By Activity Type">
+  Select from dropdown:
+  - All Types
+  - task_created
+  - agent_status_change
+  - comment_added
+  - etc.
+</Accordion>
+
+<Accordion title="By Actor">
+  Filter to specific agent or user:
+  - All Actors
+  - researcher-01
+  - system
+  - admin
+</Accordion>
+
+<Accordion title="By Limit">
+  Control result count:
+  - 25 items
+  - 50 items (default)
+  - 100 items
+  - 200 items
+</Accordion>
+
+### Live vs. Paused Mode
+
+Toggle auto-refresh with the **Live/Paused** button:
+
+- **Live** 🟢 — Updates every 30 seconds + instant SSE delivery
+- **Paused** ⚫ — Manual refresh only
+
+<Note>
+When SSE is connected, "Live" mode pauses polling and relies entirely on event stream. Notifications arrive within ~50ms.
+</Note>
+
+## Live Sessions
+
+Track active agent sessions in real-time (gateway-connected agents only).
+
+### Session Attributes
+
+| Field | Description |
+|-------|-------------|
+| **Key** | Unique session identifier |
+| **Kind** | Session type (e.g., "clawd", "agent", "cli") |
+| **Age** | Time since session started (e.g., "2h", "5m") |
+| **Model** | LLM model in use (normalized, e.g., "sonnet-4") |
+| **Tokens** | Usage (e.g., "12.5K/35K") |
+| **Active** | Boolean indicator (active if updated within last hour) |
+| **Message Count** | Number of messages exchanged |
+| **Cost** | Estimated cost in USD |
+
+### Viewing Sessions
+
+Sessions appear in the **Sessions** panel (if gateway is connected) or can be queried via API:
+
+```bash
+curl http://localhost:3000/api/sessions \
+  -H "x-api-key: your-api-key"
+```
+
+**Response:**
+```json
+{
+  "sessions": [
+    {
+      "id": "session-abc123",
+      "key": "clawd-researcher-01",
+      "kind": "clawd",
+      "age": "2h",
+      "model": "sonnet-4",
+      "tokens": "12500/35000",
+      "active": true,
+      "startTime": 1735689600000,
+      "lastActivity": 1735696800000,
+      "messageCount": 47,
+      "cost": 0.0875
+    }
+  ]
+}
+```
+
+## Log Viewer
+
+Stream logs from agents and gateway in real-time.
+
+### Accessing Logs
+
+<Steps>
+  <Step title="Open Log Viewer">
+    Navigate to **Logs** in the side panel.
+  </Step>
+  <Step title="View Stream">
+    Logs auto-scroll as new entries arrive.
+  </Step>
+  <Step title="Filter">
+    Use level filters (info/warn/error) or search bar.
+  </Step>
+</Steps>
+
+### Log Levels
+
+<CardGroup cols={4}>
+  <Card title="Debug" icon="bug">
+    Verbose diagnostic messages
+  </Card>
+  <Card title="Info" icon="info">
+    Normal operational events
+  </Card>
+  <Card title="Warn" icon="triangle-exclamation">
+    Potential issues requiring attention
+  </Card>
+  <Card title="Error" icon="circle-xmark">
+    Failures and exceptions
+  </Card>
+</CardGroup>
+
+### Log Structure
+
+Each log entry includes:
+
+```json
+{
+  "id": "log-1735696800-abc123",
+  "timestamp": 1735696800000,
+  "level": "info",
+  "source": "agent",
+  "session": "clawd-researcher-01",
+  "message": "Task #42 completed successfully",
+  "data": {"taskId": 42, "duration": 320}
+}
+```
+
+### Searching Logs
+
+Use the Log Viewer search bar or query via API:
+
+```bash
+# Search by text
+curl http://localhost:3000/api/logs?search=error \
+  -H "x-api-key: your-api-key"
+
+# Filter by level
+curl http://localhost:3000/api/logs?level=error \
+  -H "x-api-key: your-api-key"
+
+# Filter by source
+curl http://localhost:3000/api/logs?source=gateway \
+  -H "x-api-key: your-api-key"
+```
+
+## WebSocket Connection
+
+Mission Control connects to the OpenClaw gateway via WebSocket.
+
+### Connection Flow
+
+<Steps>
+  <Step title="Challenge-Response Handshake">
+    1. Client connects to `ws://gateway:18789`
+    2. Server sends `connect.challenge` with nonce
+    3. Client signs payload with Ed25519 device identity
+    4. Server validates signature and returns device token
+  </Step>
+  <Step title="Authenticated Session">
+    WebSocket connection authenticated. Client can subscribe to events.
+  </Step>
+  <Step title="Heartbeat Monitoring">
+    Client sends ping every 30 seconds. Server responds with pong. RTT tracked.
+  </Step>
+</Steps>
+
+### Connection Status
+
+View connection state in the header bar:
+
+- 🟢 **Connected** — Gateway online, receiving events
+- 🟡 **Connecting** — Handshake in progress
+- 🔴 **Disconnected** — Offline or connection failed
+- ⚠️ **Reconnecting** — Attempting reconnection (exponential backoff)
+
+### Manual Reconnect
+
+If connection drops:
+
+1. Check gateway status (is it running?)
+2. Verify `OPENCLAW_GATEWAY_HOST` and `OPENCLAW_GATEWAY_PORT` in `.env`
+3. Click **Reconnect** in the connection status widget
+
+<Warning>
+If handshake fails with "origin not allowed", add your Mission Control URL to `gateway.controlUi.allowedOrigins` in the gateway's `openclaw.json`.
+</Warning>
+
+## Server-Sent Events (SSE)
+
+Mission Control uses SSE to stream database change events to all connected clients.
+
+### Event Types
+
+- `agent.created`
+- `agent.updated`
+- `agent.deleted`
+- `task.created`
+- `task.updated`
+- `task.deleted`
+- `comment.added`
+- `notification.created`
+
+### SSE Connection
+
+Clients automatically connect to `/api/events` on page load:
+
+```javascript
+const eventSource = new EventSource('/api/events')
+
+eventSource.addEventListener('task.updated', (e) => {
+  const task = JSON.parse(e.data)
+  console.log('Task updated:', task)
+})
+```
+
+### Connection Indicator
+
+The SSE connection status appears in the Activity Feed:
+
+- 🟢 **SSE Connected** — Live event stream active
+- 🔴 **SSE Disconnected** — Falling back to polling
+
+## Smart Polling
+
+When neither WebSocket nor SSE is available, Mission Control uses intelligent polling:
+
+### Polling Behavior
+
+<Tabs>
+  <Tab title="Tab Visible">
+    - Poll every 30 seconds (configurable per component)
+    - Fire immediate refresh on visibility change
+    - Reset backoff multiplier
+  </Tab>
+  <Tab title="Tab Hidden">
+    - Stop all polling
+    - Conserve battery and bandwidth
+    - Resume instantly when tab becomes visible
+  </Tab>
+  <Tab title="WebSocket Connected">
+    - Pause polling (events via WS)
+    - Optional per-component override
+  </Tab>
+  <Tab title="SSE Connected">
+    - Pause polling (events via SSE)
+    - Configurable with `pauseWhenSseConnected: true`
+  </Tab>
+</Tabs>
+
+### Implementation
+
+Components use the `useSmartPoll` hook:
+
+```typescript
+import { useSmartPoll } from '@/lib/use-smart-poll'
+
+function MyPanel() {
+  const fetchData = async () => {
+    const response = await fetch('/api/data')
+    const data = await response.json()
+    setData(data)
+  }
+
+  // Poll every 30s, pause when SSE is connected
+  useSmartPoll(fetchData, 30000, { 
+    pauseWhenSseConnected: true 
+  })
+}
+```
+
+## Heartbeat System
+
+Mission Control tracks agent liveness via periodic heartbeats.
+
+### Agent Heartbeat
+
+Agents send heartbeats every 60-300 seconds (configurable):
+
+```bash
+curl -X POST http://localhost:3000/api/agents/{id}/heartbeat \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "status": "idle",
+    "last_activity": "Completed task #42"
+  }'
+```
+
+### Automatic Timeout
+
+The background scheduler runs every 5 minutes:
+
+1. Query agents with `status != 'offline'` and `last_seen < threshold`
+2. Mark stale agents as **offline**
+3. Log activity: "Agent marked offline (no heartbeat for 10m)"
+4. Create notification for operator
+
+<Accordion title="Configure Timeout">
+  Adjust in Settings → General:
+  
+  ```json
+  {
+    "general.agent_heartbeat_timeout": 600
+  }
+  ```
+  
+  Value in seconds (default: 600 = 10 minutes).
+</Accordion>
+
+### WebSocket Heartbeat
+
+Gateway connections send ping/pong every 30 seconds:
+
+- **Ping sent** — Client sends `{type: "req", method: "ping", id: "ping-1"}`
+- **Pong received** — Server responds with `{type: "res", id: "ping-1", ok: true}`
+- **RTT calculated** — Round-trip time displayed in connection status
+- **Missed pongs** — After 3 missed pongs (90s), force reconnect
+
+## Notifications
+
+Real-time notifications appear in the **Notifications** panel:
+
+### Notification Types
+
+- **Info** — General system messages
+- **Warn** — Potential issues (e.g., agent offline)
+- **Error** — Critical failures (e.g., deployment failed)
+- **Heartbeat** — Agent liveness alerts
+
+### Viewing Notifications
+
+<Steps>
+  <Step title="Open Panel">
+    Click **Notifications** in the side rail.
+  </Step>
+  <Step title="Review Items">
+    Unread notifications appear bold.
+  </Step>
+  <Step title="Mark Read">
+    Click a notification to mark it read.
+  </Step>
+  <Step title="Clear All">
+    Click **Clear All** to dismiss all notifications.
+  </Step>
+</Steps>
+
+### API Access
+
+```bash
+# Get notifications for current user
+curl http://localhost:3000/api/notifications \
+  -H "x-api-key: your-api-key"
+
+# Mark as read
+curl -X PUT http://localhost:3000/api/notifications/{id} \
+  -H "Content-Type: application/json" \
+  -d '{"read": true}'
+```
+
+## Performance Metrics
+
+### Connection Latency
+
+WebSocket RTT displayed in connection status widget:
+
+- **< 50ms** — Excellent
+- **50-100ms** — Good
+- **100-200ms** — Fair
+- **> 200ms** — Check network or gateway load
+
+### Event Delivery
+
+- **WebSocket** — Near-instant (< 10ms after gateway receives event)
+- **SSE** — Fast (< 50ms after database write)
+- **Polling** — Delayed (up to 30s depending on interval)
+
+## Troubleshooting
+
+<Accordion title="Activity Feed Not Updating">
+  1. Check SSE connection status (green indicator)
+  2. Verify browser dev tools for SSE errors
+  3. Confirm `Live` mode is enabled
+  4. Try clicking **Refresh** manually
+</Accordion>
+
+<Accordion title="WebSocket Connection Failed">
+  1. Verify gateway is running: `ps aux | grep gateway`
+  2. Check gateway port: `OPENCLAW_GATEWAY_PORT` in `.env`
+  3. Test gateway directly: `wscat -c ws://localhost:18789`
+  4. Check `allowedOrigins` in gateway `openclaw.json`
+</Accordion>
+
+<Accordion title="Logs Not Appearing">
+  1. Confirm gateway is connected (green status)
+  2. Check log level filters (remove any filters)
+  3. Verify agents are sending logs (check gateway logs)
+  4. Try `/api/logs` endpoint directly to rule out UI issue
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Cost Tracking" icon="dollar-sign" href="/features/cost-tracking">
+    Monitor token usage and costs with per-model breakdowns
+  </Card>
+  <Card title="Background Automation" icon="clock" href="/features/background-automation">
+    Configure automated tasks and monitoring rules
+  </Card>
+</CardGroup>

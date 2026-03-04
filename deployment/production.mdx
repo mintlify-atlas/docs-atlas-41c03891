@@ -1,0 +1,486 @@
+---
+title: Production Deployment
+description: Best practices for deploying Mission Control in production environments
+---
+
+Mission Control supports both direct Node.js deployments and containerized deployments. This guide covers production-ready configurations, infrastructure patterns, and operational best practices.
+
+## Prerequisites
+
+<Steps>
+  <Step title="System Requirements">
+    - **Node.js** >= 20 (LTS recommended)
+    - **pnpm** (installed via `corepack enable && corepack prepare pnpm@latest --activate`)
+    - **Build tools** for `better-sqlite3` native compilation:
+      - Ubuntu/Debian: `sudo apt-get install -y python3 make g++`
+      - macOS: `xcode-select --install`
+  </Step>
+  
+  <Step title="Network Configuration">
+    - Open port 3000 (or your custom port) for incoming HTTP/HTTPS traffic
+    - Configure reverse proxy (Nginx, Caddy, Traefik) for TLS termination
+    - Set up DNS records pointing to your server
+  </Step>
+  
+  <Step title="Security Preparation">
+    - Generate strong credentials:
+      ```bash
+      openssl rand -base64 32  # AUTH_PASS
+      openssl rand -hex 32     # API_KEY
+      ```
+    - Prepare TLS certificates (Let's Encrypt recommended)
+    - Configure firewall rules (allow only necessary ports)
+  </Step>
+</Steps>
+
+## Deployment Methods
+
+### Direct Deployment (systemd)
+
+For direct Node.js deployments on Linux servers with systemd:
+
+<Steps>
+  <Step title="Install dependencies and build">
+    ```bash
+    cd /opt/mission-control
+    pnpm install --frozen-lockfile
+    pnpm build
+    ```
+    
+    <Warning>
+      The production build bundles platform-specific native binaries. You **must** run `pnpm install` and `pnpm build` on the same OS and architecture as the target server.
+      
+      A build created on macOS will not work on Linux.
+    </Warning>
+  </Step>
+  
+  <Step title="Create environment file">
+    ```bash /opt/mission-control/.env
+    NODE_ENV=production
+    AUTH_USER=admin
+    AUTH_PASS=<strong-password>
+    API_KEY=<secure-api-key>
+    MC_ALLOWED_HOSTS=yourdomain.com,*.internal.example.com
+    MC_COOKIE_SECURE=true
+    MC_COOKIE_SAMESITE=strict
+    PORT=3000
+    ```
+    
+    Restrict file permissions:
+    ```bash
+    chmod 600 /opt/mission-control/.env
+    chown mission-control:mission-control /opt/mission-control/.env
+    ```
+  </Step>
+  
+  <Step title="Create systemd service">
+    ```ini /etc/systemd/system/mission-control.service
+    [Unit]
+    Description=Mission Control AI Agent Orchestration Dashboard
+    After=network.target
+    
+    [Service]
+    Type=simple
+    User=mission-control
+    Group=mission-control
+    WorkingDirectory=/opt/mission-control
+    EnvironmentFile=/opt/mission-control/.env
+    ExecStart=/usr/bin/pnpm start
+    Restart=on-failure
+    RestartSec=10s
+    StandardOutput=journal
+    StandardError=journal
+    SyslogIdentifier=mission-control
+    
+    # Security hardening
+    NoNewPrivileges=true
+    PrivateTmp=true
+    ProtectSystem=strict
+    ProtectHome=true
+    ReadWritePaths=/opt/mission-control/.data
+    
+    [Install]
+    WantedBy=multi-user.target
+    ```
+  </Step>
+  
+  <Step title="Start the service">
+    ```bash
+    sudo systemctl daemon-reload
+    sudo systemctl enable mission-control
+    sudo systemctl start mission-control
+    sudo systemctl status mission-control
+    ```
+  </Step>
+</Steps>
+
+### Docker Deployment
+
+For containerized deployments, see the [Docker Deployment](/deployment/docker) guide.
+
+**Quick start:**
+
+```bash
+docker compose up -d
+```
+
+## Reverse Proxy Configuration
+
+Always deploy Mission Control behind a reverse proxy for TLS termination and security headers.
+
+<CodeGroup>
+```nginx Nginx
+server {
+    listen 443 ssl http2;
+    server_name mc.example.com;
+    
+    ssl_certificate /etc/letsencrypt/live/mc.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/mc.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    
+    # Security headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+
+server {
+    listen 80;
+    server_name mc.example.com;
+    return 301 https://$server_name$request_uri;
+}
+```
+
+```caddyfile Caddy
+mc.example.com {
+    reverse_proxy localhost:3000
+    
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Frame-Options "DENY"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+}
+```
+
+```yaml Traefik (docker-compose.yml)
+services:
+  mission-control:
+    image: mission-control:latest
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mc.rule=Host(`mc.example.com`)"
+      - "traefik.http.routers.mc.entrypoints=websecure"
+      - "traefik.http.routers.mc.tls.certresolver=letsencrypt"
+      - "traefik.http.middlewares.mc-headers.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.mc-headers.headers.frameDeny=true"
+      - "traefik.http.routers.mc.middlewares=mc-headers"
+```
+</CodeGroup>
+
+## High Availability Considerations
+
+<Warning>
+  Mission Control uses SQLite and does **not support horizontal scaling** with multiple instances writing to the same database.
+  
+  SQLite uses WAL mode but only supports a single writer process.
+</Warning>
+
+### Single Instance with Failover
+
+For production deployments, use active-passive failover:
+
+1. **Primary server:** Runs Mission Control with mounted data volume
+2. **Standby server:** Warm standby with replicated data
+3. **Health checks:** Monitor primary server health
+4. **Automatic failover:** Promote standby on primary failure
+
+**Example with Docker Swarm:**
+
+```yaml
+services:
+  mission-control:
+    image: mission-control:latest
+    deploy:
+      replicas: 1  # Single instance only
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    volumes:
+      - mc-data:/app/.data
+```
+
+### Read Replicas (Future)
+
+For read-heavy workloads, Mission Control may support read replicas in the future using SQLite's WAL mode replication.
+
+## Monitoring & Observability
+
+### Health Check Endpoint
+
+Mission Control responds to health checks at the `/login` endpoint:
+
+```bash
+curl -f http://localhost:3000/login || exit 1
+```
+
+### Systemd Journal Logs
+
+View logs with journalctl:
+
+```bash
+# Follow logs in real-time
+sudo journalctl -u mission-control -f
+
+# Last 100 lines
+sudo journalctl -u mission-control -n 100
+
+# Errors only
+sudo journalctl -u mission-control -p err
+```
+
+### Docker Logs
+
+```bash
+# Follow logs
+docker compose logs -f mission-control
+
+# Last 100 lines
+docker compose logs --tail=100 mission-control
+```
+
+### Metrics (Recommended)
+
+Integrate with monitoring platforms:
+
+- **Prometheus:** Export metrics via `/api/metrics` endpoint (if configured)
+- **Grafana:** Visualize performance and usage dashboards
+- **Uptime monitoring:** Pingdom, UptimeRobot, or Healthchecks.io
+
+## Backup Strategy
+
+<Steps>
+  <Step title="Stop the application">
+    ```bash
+    # systemd
+    sudo systemctl stop mission-control
+    
+    # Docker
+    docker compose down
+    ```
+  </Step>
+  
+  <Step title="Backup the database">
+    ```bash
+    # Direct deployment
+    cp /opt/mission-control/.data/mission-control.db /backups/mc-$(date +%Y%m%d).db
+    
+    # Docker volume
+    docker run --rm -v mc-data:/data -v $(pwd):/backup ubuntu \
+      tar czf /backup/mc-backup-$(date +%Y%m%d).tar.gz -C /data .
+    ```
+  </Step>
+  
+  <Step title="Restart the application">
+    ```bash
+    # systemd
+    sudo systemctl start mission-control
+    
+    # Docker
+    docker compose up -d
+    ```
+  </Step>
+</Steps>
+
+### Automated Backups with Cron
+
+```bash
+# /etc/cron.daily/mission-control-backup
+#!/bin/bash
+set -euo pipefail
+
+BACKUP_DIR="/backups/mission-control"
+DATE=$(date +%Y%m%d-%H%M%S)
+RETENTION_DAYS=30
+
+mkdir -p "$BACKUP_DIR"
+
+# Docker deployment
+docker run --rm \
+  -v mc-data:/data \
+  -v "$BACKUP_DIR:/backup" \
+  ubuntu tar czf "/backup/mc-$DATE.tar.gz" -C /data .
+
+# Delete old backups
+find "$BACKUP_DIR" -name 'mc-*.tar.gz' -mtime +$RETENTION_DAYS -delete
+
+echo "Backup completed: mc-$DATE.tar.gz"
+```
+
+Make executable:
+
+```bash
+chmod +x /etc/cron.daily/mission-control-backup
+```
+
+## Data Retention
+
+Configure automatic cleanup of old data to prevent database growth:
+
+```bash
+MC_RETAIN_ACTIVITIES_DAYS=90
+MC_RETAIN_AUDIT_DAYS=365
+MC_RETAIN_LOGS_DAYS=30
+MC_RETAIN_NOTIFICATIONS_DAYS=60
+MC_RETAIN_PIPELINE_RUNS_DAYS=90
+MC_RETAIN_TOKEN_USAGE_DAYS=90
+```
+
+See [Environment Variables](/deployment/environment-variables#data-retention) for details.
+
+## Upgrading
+
+<Steps>
+  <Step title="Backup the database">
+    Follow the [backup procedure](#backup-strategy) before upgrading.
+  </Step>
+  
+  <Step title="Pull the latest code or image">
+    ```bash
+    # Direct deployment
+    git pull origin main
+    pnpm install --frozen-lockfile
+    pnpm build
+    
+    # Docker
+    docker compose pull
+    docker compose build
+    ```
+  </Step>
+  
+  <Step title="Restart the service">
+    ```bash
+    # systemd
+    sudo systemctl restart mission-control
+    
+    # Docker
+    docker compose down
+    docker compose up -d
+    ```
+  </Step>
+  
+  <Step title="Verify the upgrade">
+    Check logs for errors:
+    ```bash
+    # systemd
+    sudo journalctl -u mission-control -f
+    
+    # Docker
+    docker compose logs -f mission-control
+    ```
+    
+    Test critical functionality:
+    - Login with admin credentials
+    - Verify gateway connectivity
+    - Test API endpoints
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### "Database locked" errors
+
+Ensure only one instance is running:
+
+```bash
+# systemd
+sudo systemctl status mission-control
+
+# Docker
+docker ps | grep mission-control
+```
+
+### "Module not found: better-sqlite3"
+
+Native compilation failed. Reinstall with build tools:
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install -y python3 make g++
+rm -rf node_modules
+pnpm install
+pnpm build
+```
+
+### "Invalid ELF header" or "Mach-O" errors
+
+Native binary was compiled on a different platform. Rebuild on the target server:
+
+```bash
+rm -rf node_modules .next
+pnpm install
+pnpm build
+```
+
+### "Forbidden" (403) errors
+
+Host access control is blocking the request. Add your domain to `MC_ALLOWED_HOSTS`:
+
+```bash
+MC_ALLOWED_HOSTS=localhost,127.0.0.1,yourdomain.com
+```
+
+See [Security - Network Access Control](/deployment/security#network-access-control).
+
+## Production Checklist
+
+<Steps>
+  <Step title="Security">
+    - [ ] Set strong `AUTH_PASS` and `API_KEY`
+    - [ ] Configure `MC_ALLOWED_HOSTS` to restrict access
+    - [ ] Enable `MC_COOKIE_SECURE=true` for HTTPS
+    - [ ] Deploy behind reverse proxy with TLS
+    - [ ] Configure firewall rules
+    - [ ] Review [Security Best Practices](/deployment/security)
+  </Step>
+  
+  <Step title="Reliability">
+    - [ ] Mount persistent volume for `/app/.data`
+    - [ ] Configure restart policy (`systemd` or Docker)
+    - [ ] Set up health checks
+    - [ ] Implement backup automation
+    - [ ] Test restore procedure
+  </Step>
+  
+  <Step title="Monitoring">
+    - [ ] Configure centralized logging
+    - [ ] Set up uptime monitoring
+    - [ ] Create alerting rules for errors
+    - [ ] Monitor disk usage for SQLite database
+  </Step>
+  
+  <Step title="Performance">
+    - [ ] Configure data retention policies
+    - [ ] Schedule regular database vacuuming
+    - [ ] Monitor SQLite WAL file growth
+  </Step>
+</Steps>

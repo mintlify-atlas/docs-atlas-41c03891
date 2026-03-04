@@ -1,0 +1,621 @@
+---
+title: GitHub Sync
+description: Bi-directional sync between GitHub Issues and Mission Control tasks
+icon: github
+---
+
+## Overview
+
+Mission Control's **GitHub integration** enables seamless synchronization between GitHub Issues and Mission Control tasks. Import issues as tasks, post comments, and close issues directly from Mission Control.
+
+<Note>
+Requires `GITHUB_TOKEN` environment variable with `repo` scope.
+</Note>
+
+## Setup
+
+<Steps>
+
+<Step title="Generate GitHub Token">
+Create a Personal Access Token (classic) with `repo` scope:
+
+1. Go to GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)
+2. Click "Generate new token (classic)"
+3. Select scopes:
+   - ✅ `repo` (Full control of private repositories)
+4. Copy the generated token
+
+<Warning>
+Store the token securely. GitHub only shows it once.
+</Warning>
+
+</Step>
+
+<Step title="Configure Environment Variable">
+Add to your Mission Control `.env` file:
+
+```bash
+GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+Optionally set a default repository:
+```bash
+GITHUB_DEFAULT_REPO=owner/repo-name
+```
+
+</Step>
+
+<Step title="Restart Mission Control">
+```bash
+pnpm dev  # Development
+# or
+systemctl restart mission-control  # Production
+```
+
+</Step>
+
+</Steps>
+
+## Sync GitHub Issues to Tasks
+
+### Preview Issues
+
+Fetch issues from a repository without importing:
+
+```bash
+curl "http://localhost:3000/api/github?action=issues&repo=owner/repo&state=open&labels=bug" \
+  -H "x-api-key: YOUR_API_KEY"
+```
+
+**Query Parameters:**
+
+<ParamField query="action" type="string" required>
+  Must be `issues` for preview or `stats` for repository statistics
+</ParamField>
+
+<ParamField query="repo" type="string" required>
+  Repository in `owner/repo` format (overrides `GITHUB_DEFAULT_REPO`)
+</ParamField>
+
+<ParamField query="state" type="string" default="open">
+  Issue state: `open`, `closed`, or `all`
+</ParamField>
+
+<ParamField query="labels" type="string">
+  Comma-separated label filter (e.g., `bug,enhancement`)
+</ParamField>
+
+**Response:**
+```json
+{
+  "issues": [
+    {
+      "number": 42,
+      "title": "Fix authentication bug",
+      "body": "Users cannot log in with GitHub OAuth",
+      "state": "open",
+      "labels": [
+        {"name": "bug", "color": "d73a4a"},
+        {"name": "priority:high", "color": "e99695"}
+      ],
+      "assignee": {
+        "login": "alice",
+        "avatar_url": "https://avatars.githubusercontent.com/u/..."
+      },
+      "html_url": "https://github.com/owner/repo/issues/42",
+      "created_at": "2024-03-04T10:30:00Z",
+      "updated_at": "2024-03-04T15:45:00Z"
+    }
+  ],
+  "total": 1,
+  "repo": "owner/repo"
+}
+```
+
+### Import Issues as Tasks
+
+```bash
+curl -X POST http://localhost:3000/api/github \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{
+    "action": "sync",
+    "repo": "owner/repo",
+    "state": "open",
+    "labels": "bug,priority:high",
+    "assignAgent": "debugging-agent"
+  }'
+```
+
+<ParamField body="action" type="string" required>
+  Must be `sync`
+</ParamField>
+
+<ParamField body="repo" type="string" required>
+  Repository in `owner/repo` format
+</ParamField>
+
+<ParamField body="state" type="string" default="open">
+  Issue state to sync: `open`, `closed`, or `all`
+</ParamField>
+
+<ParamField body="labels" type="string">
+  Comma-separated label filter
+</ParamField>
+
+<ParamField body="assignAgent" type="string">
+  Automatically assign imported tasks to this agent
+</ParamField>
+
+**Response:**
+```json
+{
+  "imported": 5,
+  "skipped": 2,
+  "errors": 0,
+  "tasks": [
+    {
+      "id": 101,
+      "title": "Fix authentication bug",
+      "description": "Users cannot log in with GitHub OAuth",
+      "status": "inbox",
+      "priority": "high",
+      "assigned_to": "debugging-agent",
+      "tags": ["bug", "priority:high"],
+      "metadata": {
+        "github_repo": "owner/repo",
+        "github_issue_number": 42,
+        "github_issue_url": "https://github.com/owner/repo/issues/42",
+        "github_synced_at": "2024-03-04T15:50:00.000Z",
+        "github_state": "open"
+      }
+    }
+  ]
+}
+```
+
+**Sync Behavior:**
+- **Duplicate Prevention:** Issues already imported (matching `github_repo` + `github_issue_number`) are skipped
+- **Status Mapping:** `open` → `inbox`, `closed` → `done`
+- **Priority Mapping:** Extracted from labels (see below)
+- **Tags:** All GitHub labels are imported as task tags
+
+## Label to Priority Mapping
+
+Mission Control automatically maps GitHub labels to task priorities:
+
+| GitHub Label | Task Priority |
+|--------------|---------------|
+| `priority:critical`, `critical` | `critical` |
+| `priority:high`, `high` | `high` |
+| `priority:medium` | `medium` |
+| `priority:low`, `low` | `low` |
+| *(no match)* | `medium` |
+
+<Tip>
+Add priority labels to your GitHub issues for better task organization:
+- `priority:critical` - Production outages, security issues
+- `priority:high` - Blocking bugs, urgent features
+- `priority:medium` - Standard work
+- `priority:low` - Nice-to-have improvements
+</Tip>
+
+## Post Comments to Issues
+
+Send a comment to a GitHub issue:
+
+```bash
+curl -X POST http://localhost:3000/api/github \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{
+    "action": "comment",
+    "repo": "owner/repo",
+    "issueNumber": 42,
+    "body": "This issue has been assigned to debugging-agent in Mission Control."
+  }'
+```
+
+<ParamField body="action" type="string" required>
+  Must be `comment`
+</ParamField>
+
+<ParamField body="repo" type="string" required>
+  Repository in `owner/repo` format
+</ParamField>
+
+<ParamField body="issueNumber" type="number" required>
+  GitHub issue number
+</ParamField>
+
+<ParamField body="body" type="string" required>
+  Comment text (Markdown supported)
+</ParamField>
+
+**Response:**
+```json
+{"ok": true}
+```
+
+## Close GitHub Issues
+
+Close an issue (optionally with a final comment):
+
+```bash
+curl -X POST http://localhost:3000/api/github \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{
+    "action": "close",
+    "repo": "owner/repo",
+    "issueNumber": 42,
+    "comment": "Fixed in #123. Closing this issue."
+  }'
+```
+
+<ParamField body="action" type="string" required>
+  Must be `close`
+</ParamField>
+
+<ParamField body="repo" type="string" required>
+  Repository in `owner/repo` format
+</ParamField>
+
+<ParamField body="issueNumber" type="number" required>
+  GitHub issue number to close
+</ParamField>
+
+<ParamField body="comment" type="string">
+  Optional closing comment (posted before closing)
+</ParamField>
+
+**Response:**
+```json
+{"ok": true}
+```
+
+**Behavior:**
+- Posts `comment` (if provided)
+- Closes the GitHub issue
+- Updates linked Mission Control task metadata: `github_state` → `closed`
+
+## Sync History
+
+Retrieve recent sync operations:
+
+```bash
+curl -X POST http://localhost:3000/api/github \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{"action": "status"}'
+```
+
+**Response:**
+```json
+{
+  "syncs": [
+    {
+      "id": 5,
+      "repo": "owner/repo",
+      "last_synced_at": 1709582400,
+      "issue_count": 5,
+      "sync_direction": "inbound",
+      "status": "success",
+      "error": null,
+      "created_at": 1709582400
+    }
+  ]
+}
+```
+
+## GitHub Stats
+
+Fetch authenticated user profile and repository statistics:
+
+```bash
+curl "http://localhost:3000/api/github?action=stats" \
+  -H "x-api-key: YOUR_API_KEY"
+```
+
+**Response:**
+```json
+{
+  "user": {
+    "login": "alice",
+    "name": "Alice Developer",
+    "avatar_url": "https://avatars.githubusercontent.com/u/...",
+    "public_repos": 42,
+    "followers": 120,
+    "following": 85
+  },
+  "repos": {
+    "total": 42,
+    "public": 35,
+    "private": 7,
+    "total_stars": 523,
+    "total_forks": 89,
+    "total_open_issues": 34
+  },
+  "topLanguages": [
+    {"name": "TypeScript", "count": 18},
+    {"name": "Python", "count": 12},
+    {"name": "JavaScript", "count": 8}
+  ],
+  "recentRepos": [
+    {
+      "name": "alice/mission-control",
+      "description": "AI agent orchestration dashboard",
+      "language": "TypeScript",
+      "stars": 234,
+      "forks": 45,
+      "open_issues": 8,
+      "pushed_at": "2024-03-04T12:00:00Z",
+      "is_fork": false,
+      "is_private": false,
+      "html_url": "https://github.com/alice/mission-control"
+    }
+  ]
+}
+```
+
+<Note>
+Stats endpoint filters out inactive forks (forks where you've never pushed commits).
+</Note>
+
+## Automation Examples
+
+### Daily Issue Sync (Cron)
+
+Sync high-priority bugs daily:
+
+```bash
+#!/bin/bash
+# sync-github-issues.sh
+
+API_KEY="operator:abc123"
+REPO="owner/repo"
+BASE_URL="http://localhost:3000"
+
+curl -X POST "${BASE_URL}/api/github" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: ${API_KEY}" \
+  -d "{
+    \"action\": \"sync\",
+    \"repo\": \"${REPO}\",
+    \"state\": \"open\",
+    \"labels\": \"bug,priority:high\",
+    \"assignAgent\": \"triaging-agent\"
+  }"
+```
+
+Add to crontab:
+```bash
+0 9 * * * /path/to/sync-github-issues.sh
+```
+
+### Auto-comment on Task Assignment
+
+When an agent is assigned to a GitHub-linked task, post a comment:
+
+<CodeGroup>
+
+```javascript Webhook Handler
+// webhook-receiver.js
+const express = require('express');
+const crypto = require('crypto');
+
+const app = express();
+app.use(express.json());
+
+app.post('/webhook', (req, res) => {
+  const event = req.body;
+  
+  if (event.event === 'activity.task_assigned' && event.data.metadata?.github_repo) {
+    const { github_repo, github_issue_number } = event.data.metadata;
+    const assignedAgent = event.data.assigned_to;
+    
+    // Post comment to GitHub
+    fetch('http://localhost:3000/api/github', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.MC_API_KEY,
+      },
+      body: JSON.stringify({
+        action: 'comment',
+        repo: github_repo,
+        issueNumber: github_issue_number,
+        body: `🤖 Assigned to **${assignedAgent}** in Mission Control.`,
+      }),
+    });
+  }
+  
+  res.json({ ok: true });
+});
+
+app.listen(3001, () => console.log('Webhook receiver running on :3001'));
+```
+
+```python Flask
+from flask import Flask, request
+import requests
+import os
+
+app = Flask(__name__)
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    event = request.json
+    
+    if (event['event'] == 'activity.task_assigned' and 
+        event['data'].get('metadata', {}).get('github_repo')):
+        
+        metadata = event['data']['metadata']
+        github_repo = metadata['github_repo']
+        github_issue_number = metadata['github_issue_number']
+        assigned_agent = event['data']['assigned_to']
+        
+        # Post comment to GitHub
+        requests.post(
+            'http://localhost:3000/api/github',
+            headers={
+                'Content-Type': 'application/json',
+                'x-api-key': os.getenv('MC_API_KEY'),
+            },
+            json={
+                'action': 'comment',
+                'repo': github_repo,
+                'issueNumber': github_issue_number,
+                'body': f'🤖 Assigned to **{assigned_agent}** in Mission Control.',
+            },
+        )
+    
+    return {'ok': True}
+
+if __name__ == '__main__':
+    app.run(port=3001)
+```
+
+</CodeGroup>
+
+### Close Issue When Task Completes
+
+Automatically close GitHub issues when tasks are marked `done`:
+
+```javascript
+// task-completion-handler.js
+eventBus.on('task.status_changed', async (event) => {
+  const { id, status, metadata } = event.data;
+  
+  if (status === 'done' && metadata?.github_repo) {
+    await fetch('http://localhost:3000/api/github', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.MC_API_KEY,
+      },
+      body: JSON.stringify({
+        action: 'close',
+        repo: metadata.github_repo,
+        issueNumber: metadata.github_issue_number,
+        comment: `✅ Task completed in Mission Control. Closing this issue.`,
+      }),
+    });
+  }
+});
+```
+
+## API Rate Limits
+
+GitHub API rate limits:
+- **Authenticated:** 5,000 requests/hour
+- **Search API:** 30 requests/minute
+
+Mission Control includes:
+- 15-second timeout per request
+- Exponential backoff on errors
+- Automatic retry on rate limit (429)
+
+<Warning>
+Batch sync operations count as multiple API calls (1 per issue). Plan accordingly.
+</Warning>
+
+## Troubleshooting
+
+<AccordionGroup>
+
+<Accordion title="GITHUB_TOKEN not configured">
+**Error:** `{"error": "GITHUB_TOKEN not configured"}`
+
+**Solution:**
+1. Verify `.env` file contains `GITHUB_TOKEN=ghp_...`
+2. Restart Mission Control
+3. Check token has `repo` scope in GitHub settings
+</Accordion>
+
+<Accordion title="GitHub API error 403: Resource not accessible">
+**Cause:** Token lacks permissions or repository is private.
+
+**Solution:**
+- For private repos: Token needs `repo` scope (not just `public_repo`)
+- Verify token owner has access to the repository
+- Check repository name format: `owner/repo` (not URL)
+</Accordion>
+
+<Accordion title="Issues imported but priority is always 'medium'">
+**Cause:** GitHub labels don't match expected format.
+
+**Solution:** Add labels to your GitHub repo:
+- `priority:critical` → critical
+- `priority:high` → high
+- `priority:low` → low
+
+Alternatively, edit `mapPriority()` function in `/src/app/api/github/route.ts`.
+</Accordion>
+
+<Accordion title="Duplicate tasks created on re-sync">
+**Cause:** Task metadata doesn't match expected schema.
+
+**Solution:** Mission Control prevents duplicates by checking:
+```sql
+json_extract(metadata, '$.github_repo') = 'owner/repo'
+AND json_extract(metadata, '$.github_issue_number') = 42
+```
+
+Ensure tasks have this metadata structure. Re-import will skip existing tasks.
+</Accordion>
+
+</AccordionGroup>
+
+## Security Best Practices
+
+<CardGroup cols={2}>
+
+<Card title="Rotate Tokens" icon="rotate">
+Rotate GitHub tokens every 90 days:
+1. Generate new token
+2. Update `GITHUB_TOKEN`
+3. Restart Mission Control
+4. Revoke old token
+</Card>
+
+<Card title="Scope Principle" icon="shield">
+Use minimum required scopes:
+- Read-only sync: `repo` (read)
+- Comment/close: `repo` (write)
+- Never use `admin:org` unless necessary
+</Card>
+
+<Card title="Webhook Security" icon="lock">
+If receiving GitHub webhooks:
+- Verify `X-Hub-Signature-256` header
+- Use webhook secrets
+- Validate payload structure
+</Card>
+
+<Card title="Token Storage" icon="key">
+Never commit tokens:
+- Use `.env` files (gitignored)
+- Or environment variables
+- Or secrets management (Vault, AWS Secrets Manager)
+</Card>
+
+</CardGroup>
+
+## Related Docs
+
+<CardGroup cols={3}>
+
+<Card title="Webhooks" icon="webhook" href="/integrations/webhooks">
+  Receive events when tasks change
+</Card>
+
+<Card title="Tasks API" icon="list-check" href="/api-reference/tasks">
+  Programmatic task management
+</Card>
+
+<Card title="CLI Integration" icon="terminal" href="/integrations/cli-integration">
+  Connect agents directly
+</Card>
+
+</CardGroup>
