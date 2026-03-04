@@ -1,0 +1,154 @@
+{
+  "projectType": "saas",
+  "projectName": "Mission Control",
+  "projectDescription": "Open-source dashboard for AI agent orchestration with fleet management, task tracking, cost monitoring, and real-time workflow coordination.",
+  "theme": "aspen",
+  "primaryColor": "#3B82F6",
+  "lightColor": "#60A5FA",
+  "darkColor": "#2563EB",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/agent-management",
+              "features/task-board",
+              "features/real-time-monitoring",
+              "features/cost-tracking",
+              "features/background-automation"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/cli-integration",
+              "integrations/github-sync",
+              "integrations/webhooks",
+              "integrations/openclaw-gateway"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/environment-variables",
+              "deployment/docker",
+              "deployment/production",
+              "deployment/security"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/agent-soul-system",
+              "advanced/pipeline-orchestration",
+              "advanced/multi-gateway",
+              "advanced/device-identity"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview",
+              "api/authentication"
+            ]
+          },
+          {
+            "group": "Core Resources",
+            "pages": [
+              "api/agents",
+              "api/tasks",
+              "api/sessions",
+              "api/tokens"
+            ]
+          },
+          {
+            "group": "Monitoring",
+            "pages": [
+              "api/activities",
+              "api/logs",
+              "api/notifications",
+              "api/events"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "api/webhooks",
+              "api/alerts",
+              "api/gateways",
+              "api/connect"
+            ]
+          },
+          {
+            "group": "Administration",
+            "pages": [
+              "api/settings",
+              "api/scheduler",
+              "api/backup",
+              "api/audit"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "28 dashboard panels for comprehensive agent orchestration",
+    "Real-time WebSocket and SSE monitoring with smart polling",
+    "Kanban task board with drag-and-drop, priorities, and assignments",
+    "Token usage and cost tracking with per-model breakdowns",
+    "Role-based access control with viewer, operator, and admin roles",
+    "Direct CLI integration without gateway requirements",
+    "Multi-gateway connection management",
+    "Background scheduler for automated tasks and cleanups",
+    "Agent SOUL system with workspace file sync",
+    "GitHub Issues sync with label and assignee mapping",
+    "Outbound webhooks with delivery history and retry logic",
+    "Quality review gates for task sign-off",
+    "Pipeline orchestration with workflow templates",
+    "Claude Code session tracking and auto-discovery"
+  ],
+  "publicApiSurface": [
+    "POST /api/auth/login - Login with username/password",
+    "POST /api/auth/logout - Destroy session",
+    "GET /api/agents - List agents with task stats",
+    "POST /api/agents - Register/update agent",
+    "GET /api/agents/[id] - Agent details",
+    "GET /api/tasks - List tasks with filters",
+    "POST /api/tasks - Create task",
+    "PUT /api/tasks/[id] - Update task",
+    "GET /api/status - System status (uptime, memory, disk)",
+    "GET /api/activities - Activity feed",
+    "GET /api/tokens - Token usage and cost data",
+    "GET /api/sessions - Active gateway sessions",
+    "POST /api/connect - Register direct CLI connection",
+    "POST /api/agents/[id]/heartbeat - Agent heartbeat with token reporting",
+    "GET /api/events - SSE stream of database changes",
+    "GET /api/webhooks - List webhooks",
+    "POST /api/webhooks - Create webhook",
+    "GET /api/alerts - List alert rules",
+    "POST /api/spawn - Spawn agent session",
+    "GET /api/claude/sessions - List Claude Code sessions",
+    "POST /api/pipelines/run - Start pipeline",
+    "GET /api/workflows - List workflow templates",
+    "GET /api/settings - App settings",
+    "POST /api/backup - Database backup",
+    "GET /api/audit - Audit log"
+  ]
+}
